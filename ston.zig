@@ -84,7 +84,7 @@ pub const Tokenizer = struct {
                         return res;
                     },
                     '\n' => {
-                        const res = Token.field(tok.str[tok.start + 1 .. tok.i]);
+                        const res = Token.invalid(tok.str[tok.start .. tok.i + 1]);
                         tok.start = tok.i + 1;
                         tok.state = .start;
                         return res;
@@ -129,21 +129,7 @@ pub const Tokenizer = struct {
 
         switch (tok.state) {
             .start => return Token.end,
-            .field => {
-                const res = Token.field(tok.str[tok.start + 1 ..]);
-                tok.state = .start;
-                tok.start = tok.str.len;
-                tok.i = tok.str.len;
-                return res;
-            },
-            .value => {
-                const res = Token.value(tok.str[tok.start + 1 ..]);
-                tok.state = .start;
-                tok.start = tok.str.len;
-                tok.i = tok.str.len;
-                return res;
-            },
-            .index, .invalid => {
+            else => {
                 const res = Token.invalid(tok.str[tok.start..]);
                 tok.state = .start;
                 tok.start = tok.str.len;
@@ -168,47 +154,47 @@ fn expectTokens(str: []const u8, results: []const Token) !void {
 }
 
 test "TokenStream" {
-    try expectTokens(".=", &.{
+    try expectTokens(".=\n", &.{
         Token.field(""),
         Token.value(""),
         Token.end,
     });
-    try expectTokens(".a=", &.{
+    try expectTokens(".a=\n", &.{
         Token.field("a"),
         Token.value(""),
         Token.end,
     });
-    try expectTokens("[]=", &.{
+    try expectTokens("[]=\n", &.{
         Token.index(""),
         Token.value(""),
         Token.end,
     });
-    try expectTokens("[1]=", &.{
+    try expectTokens("[1]=\n", &.{
         Token.index("1"),
         Token.value(""),
         Token.end,
     });
-    try expectTokens("=", &.{
+    try expectTokens("=\n", &.{
         Token.value(""),
         Token.end,
     });
-    try expectTokens("=a", &.{
+    try expectTokens("=a\n", &.{
         Token.value("a"),
         Token.end,
     });
-    try expectTokens(".a.b=c", &.{
+    try expectTokens(".a.b=c\n", &.{
         Token.field("a"),
         Token.field("b"),
         Token.value("c"),
         Token.end,
     });
-    try expectTokens(".a[1]=c", &.{
+    try expectTokens(".a[1]=c\n", &.{
         Token.field("a"),
         Token.index("1"),
         Token.value("c"),
         Token.end,
     });
-    try expectTokens(".a.b=c\n.d.e[1]=f", &.{
+    try expectTokens(".a.b=c\n.d.e[1]=f\n", &.{
         Token.field("a"),
         Token.field("b"),
         Token.value("c"),
@@ -227,10 +213,11 @@ test "TokenStream" {
         Token.invalid("a"),
         Token.end,
     });
-    try expectTokens("[1]a\n.q", &.{
+    try expectTokens("[1]a\n.q=2\n", &.{
         Token.index("1"),
         Token.invalid("a\n"),
         Token.field("q"),
+        Token.value("2"),
         Token.end,
     });
     try expectTokens(".a=0\n[1]a", &.{
@@ -372,19 +359,19 @@ test "deserializeLine" {
         enu: enum { a, b },
         index: Index(u8, u8),
     };
-    try expectDerserializeLine(".int=2", T, T{ .int = 2 });
-    try expectDerserializeLine(".float=2", T, T{ .float = 2 });
-    try expectDerserializeLine(".bol=true", T, T{ .bol = true });
-    try expectDerserializeLine(".enu=a", T, T{ .enu = .a });
-    try expectDerserializeLine(".index[2]=4", T, T{ .index = .{ .index = 2, .value = 4 } });
-    try expectDerserializeLine("[1]", T, error.ExpectedField);
-    try expectDerserializeLine(".int.a=1", T, error.ExpectedValue);
-    try expectDerserializeLine(".index.a=1", T, error.ExpectedIndex);
-    try expectDerserializeLine(".int=q", T, error.InvalidIntValue);
-    try expectDerserializeLine(".bol=q", T, error.InvalidBoolValue);
-    try expectDerserializeLine(".enu=q", T, error.InvalidEnumValue);
-    try expectDerserializeLine(".index[q]=q", T, error.InvalidIndex);
-    try expectDerserializeLine(".q=q", T, error.InvalidField);
+    try expectDerserializeLine(".int=2\n", T, T{ .int = 2 });
+    try expectDerserializeLine(".float=2\n", T, T{ .float = 2 });
+    try expectDerserializeLine(".bol=true\n", T, T{ .bol = true });
+    try expectDerserializeLine(".enu=a\n", T, T{ .enu = .a });
+    try expectDerserializeLine(".index[2]=4\n", T, T{ .index = .{ .index = 2, .value = 4 } });
+    try expectDerserializeLine("[1]\n", T, error.ExpectedField);
+    try expectDerserializeLine(".int.a=1\n", T, error.ExpectedValue);
+    try expectDerserializeLine(".index.a=1\n", T, error.ExpectedIndex);
+    try expectDerserializeLine(".int=q\n", T, error.InvalidIntValue);
+    try expectDerserializeLine(".bol=q\n", T, error.InvalidBoolValue);
+    try expectDerserializeLine(".enu=q\n", T, error.InvalidEnumValue);
+    try expectDerserializeLine(".index[q]=q\n", T, error.InvalidIndex);
+    try expectDerserializeLine(".q=q\n", T, error.InvalidField);
 }
 
 pub fn serialize(writer: anytype, value: anytype) !void {
