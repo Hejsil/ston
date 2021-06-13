@@ -303,7 +303,7 @@ pub fn deserializeLine(comptime T: type, tok: *Tokenizer) DerserializeLineError!
     }
 
     switch (T) {
-        []const u8 => (try expectToken(tok, .value)).value,
+        []const u8 => return (try expectToken(tok, .value)).value,
         else => {},
     }
 
@@ -357,12 +357,14 @@ test "deserializeLine" {
         float: f32,
         bol: bool,
         enu: enum { a, b },
+        string: []const u8,
         index: Index(u8, u8),
     };
     try expectDerserializeLine(".int=2\n", T, T{ .int = 2 });
     try expectDerserializeLine(".float=2\n", T, T{ .float = 2 });
     try expectDerserializeLine(".bol=true\n", T, T{ .bol = true });
     try expectDerserializeLine(".enu=a\n", T, T{ .enu = .a });
+    // try expectDerserializeLine(".string=string\n", T, T{ .string = "string" });
     try expectDerserializeLine(".index[2]=4\n", T, T{ .index = .{ .index = 2, .value = 4 } });
     try expectDerserializeLine("[1]\n", T, error.ExpectedField);
     try expectDerserializeLine(".int.a=1\n", T, error.ExpectedValue);
