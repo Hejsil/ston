@@ -240,6 +240,10 @@ pub fn Index(comptime _IndexType: type, comptime _ValueType: type) type {
     };
 }
 
+pub fn initIndex(index: anytype, value: anytype) Index(@TypeOf(index), @TypeOf(value)) {
+    return .{ .index = index, .value = value };
+}
+
 /// Given a type `T`, when figure out wether or not it is an `Index(G, K)`.
 pub fn isIndex(comptime T: type) bool {
     if (@typeInfo(T) != .Struct)
@@ -299,7 +303,7 @@ pub fn deserializeLine(comptime T: type, tok: *Tokenizer) DerserializeLineError!
         const token = try expectToken(tok, .index);
         const index = fmt.parseInt(T.IndexType, token.value, 0) catch return error.InvalidIndex;
         const value = try deserializeLine(T.ValueType, tok);
-        return T{ .index = index, .value = value };
+        return initIndex(index, value);
     }
 
     switch (T) {
