@@ -229,7 +229,8 @@ test "TokenStream" {
     });
 }
 
-/// Type for communicating with `deserializeLine` that this should be deserialized as an index.
+/// The type ston understands to be an index and will therefor be serialized/deserialized as
+/// such,
 pub fn Index(comptime _IndexType: type, comptime _ValueType: type) type {
     return struct {
         pub const IndexType = _IndexType;
@@ -253,6 +254,50 @@ pub fn isIndex(comptime T: type) bool {
     if (@TypeOf(T.IndexType) != type or @TypeOf(T.ValueType) != type)
         return false;
     return T == Index(T.IndexType, T.ValueType);
+}
+
+/// The type ston understands to be a field and will therefor be serialized/deserialized as
+/// such,
+pub fn Field(comptime _ValueType: type) type {
+    return struct {
+        pub const ValueType = _ValueType;
+
+        name: []const u8,
+        value: ValueType,
+    };
+}
+
+pub fn initField(name: []const u8, value: anytype) Field(@TypeOf(value)) {
+    return .{ .name = name, .value = value };
+}
+
+/// Given a type `T`, when figure out wether or not it is an `Field(K)`.
+pub fn isField(comptime T: type) bool {
+    if (@typeInfo(T) != .Struct)
+        return false;
+    if (!@hasDecl(T, "ValueType"))
+        return false;
+    if (@TypeOf(T.ValueType) != type)
+        return false;
+    return T == Field(T.ValueType);
+}
+
+/// The type to use if a slice of bytes should be serialized as a string by serialize.
+pub const String = struct {
+    bytes: []const u8,
+
+    pub fn format(
+        self: @This(),
+        comptime _: []const u8,
+        __: std.fmt.FormatOptions,
+        writer: anytype,
+    ) @TypeOf(writer).Error!void {
+        try writer.writeAll(self.bytes);
+    }
+};
+
+pub fn string(str: []const u8) String {
+    return .{ .bytes = str };
 }
 
 const Bool = enum { @"false", @"true" };
@@ -304,6 +349,11 @@ pub fn deserializeLine(comptime T: type, tok: *Tokenizer) DerserializeLineError!
         const index = fmt.parseInt(T.IndexType, token.value, 0) catch return error.InvalidIndex;
         const value = try deserializeLine(T.ValueType, tok);
         return initIndex(index, value);
+    }
+    if (comptime isField(T)) {
+        const token = try expectToken(tok, .field);
+        const value = try deserializeLine(T.ValueType, tok);
+        return initField(token.value, value);
     }
 
     switch (T) {
@@ -395,10 +445,16 @@ fn serializeHelper(writer: anytype, prefix: *io.FixedBufferStream([]u8), value: 
         try serializeHelper(writer, &copy, value.value);
         return;
     }
+    if (comptime isField(T)) {
+        var copy = prefix.*;
+        copy.writer().print(".{s}", .{value.name}) catch unreachable;
+        try serializeHelper(writer, &copy, value.value);
+        return;
+    }
 
     switch (@typeInfo(T)) {
         .Void, .Null => {},
-        .Bool => try serializeHelper(writer, prefix, if (value) "true" else "false"),
+        .Bool => try serializeHelper(writer, prefix, string(if (value) "true" else "false")),
         .Int,
         .Float,
         .ComptimeInt,
@@ -409,13 +465,10 @@ fn serializeHelper(writer: anytype, prefix: *io.FixedBufferStream([]u8), value: 
         } else {},
         .Pointer => |info| switch (info.size) {
             .One => try serializeHelper(writer, prefix, value.*),
-            .Slice => switch (info.child) {
-                u8 => try writer.print("{s}={s}\n", .{ prefix.getWritten(), value }),
-                else => for (value) |v, i| {
-                    var copy = prefix.*;
-                    copy.writer().print("[{}]", .{i}) catch unreachable;
-                    try serializeHelper(writer, &copy, v);
-                },
+            .Slice => for (value) |v, i| {
+                var copy = prefix.*;
+                copy.writer().print("[{}]", .{i}) catch unreachable;
+                try serializeHelper(writer, &copy, v);
             },
             else => @compileError("Type '" ++ @typeName(T) ++ "' not supported"),
         },
@@ -426,7 +479,7 @@ fn serializeHelper(writer: anytype, prefix: *io.FixedBufferStream([]u8), value: 
         .Enum => if (@hasDecl(T, "format")) {
             try writer.print("{s}={}\n", .{ prefix.getWritten(), value });
         } else {
-            try serializeHelper(writer, prefix, @tagName(value));
+            try serializeHelper(writer, prefix, string(@tagName(value)));
         },
         .Union => |info| {
             const Tag = meta.TagType(T);
@@ -465,13 +518,12 @@ test "serialize" {
         a: u8 = 1,
         b: enum { a, b } = .a,
         c: bool = false,
-        d: []const u8 = "abcd",
+        d: String = string("abcd"),
         e: Index(u8, u8) = .{ .index = 2, .value = 3 },
         f: union(enum) { a: u8, b: bool } = .{ .a = 2 },
         g: f32 = 1.5,
         h: void = {},
-        // i: ?u8 = 3,
-        // j: ?u8 = null,
+        i: Field(u8) = .{ .name = "a", .value = 2 },
     };
     try expectSerialized(
         \\.a=1
@@ -481,6 +533,7 @@ test "serialize" {
         \\.e[2]=3
         \\.f.a=2
         \\.g=1.5
+        \\.i.a=2
         \\
     , S{});
     try expectSerialized(
@@ -491,6 +544,7 @@ test "serialize" {
         \\[0].e[2]=3
         \\[0].f.a=2
         \\[0].g=1.5
+        \\[0].i.a=2
         \\[1].a=1
         \\[1].b=a
         \\[1].c=false
@@ -498,6 +552,7 @@ test "serialize" {
         \\[1].e[2]=3
         \\[1].f.a=2
         \\[1].g=1.5
+        \\[1].i.a=2
         \\
     , [_]S{.{}} ** 2);
 
@@ -509,6 +564,7 @@ test "serialize" {
         \\[0][0].e[2]=3
         \\[0][0].f.a=2
         \\[0][0].g=1.5
+        \\[0][0].i.a=2
         \\[0][1].a=1
         \\[0][1].b=a
         \\[0][1].c=false
@@ -516,6 +572,7 @@ test "serialize" {
         \\[0][1].e[2]=3
         \\[0][1].f.a=2
         \\[0][1].g=1.5
+        \\[0][1].i.a=2
         \\[1][0].a=1
         \\[1][0].b=a
         \\[1][0].c=false
@@ -523,6 +580,7 @@ test "serialize" {
         \\[1][0].e[2]=3
         \\[1][0].f.a=2
         \\[1][0].g=1.5
+        \\[1][0].i.a=2
         \\[1][1].a=1
         \\[1][1].b=a
         \\[1][1].c=false
@@ -530,6 +588,7 @@ test "serialize" {
         \\[1][1].e[2]=3
         \\[1][1].f.a=2
         \\[1][1].g=1.5
+        \\[1][1].i.a=2
         \\
     , [_][2]S{[_]S{.{}} ** 2} ** 2);
 }
