@@ -66,6 +66,8 @@ const HashMapParams = struct {
 };
 
 fn hashMapParams(comptime T: type) ?HashMapParams {
+    if (@hasDecl(T, "Managed"))
+        return hashMapParams(T.Managed);
     if (!@hasDecl(T, "KV") or !@hasField(T, "ctx"))
         return null;
     if (@typeInfo(T.KV) != .Struct)
@@ -159,6 +161,7 @@ comptime {
     debug.assert(!isIntMap(u8));
     debug.assert(isIntMap(std.AutoHashMap(u8, u8)));
     debug.assert(isIntMap(std.AutoArrayHashMap(u8, u8)));
+    debug.assert(isIntMap(std.AutoArrayHashMapUnmanaged(u8, u16)));
     debug.assert(!isIntMap(std.AutoHashMap([2]u8, u8)));
     debug.assert(!isIntMap(std.AutoArrayHashMap([2]u8, u8)));
 }
