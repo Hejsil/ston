@@ -9,227 +9,7 @@ const meta = std.meta;
 const testing = std.testing;
 
 pub usingnamespace @import("src/meta.zig");
-
-pub const Token = struct {
-    tag: Tag,
-    value: []const u8,
-
-    pub fn field(v: []const u8) Token {
-        return .{ .tag = .field, .value = v };
-    }
-
-    pub fn index(v: []const u8) Token {
-        return .{ .tag = .index, .value = v };
-    }
-
-    pub fn value(v: []const u8) Token {
-        return .{ .tag = .value, .value = v };
-    }
-
-    pub fn invalid(v: []const u8) Token {
-        return .{ .tag = .invalid, .value = v };
-    }
-
-    pub const end = Token{ .tag = .end, .value = "" };
-
-    pub const Tag = enum {
-        field,
-        index,
-        value,
-        invalid,
-        end,
-    };
-};
-
-pub const Tokenizer = struct {
-    str: []const u8,
-    start: usize = 0,
-    i: usize = 0,
-    state: enum {
-        start,
-        field,
-        index,
-        value,
-        invalid,
-    } = .start,
-
-    pub fn next(tok: *Tokenizer) Token {
-        while (tok.i < tok.str.len) {
-            defer tok.i += 1;
-            switch (tok.state) {
-                .start => switch (tok.str[tok.i]) {
-                    '.' => tok.state = .field,
-                    '[' => tok.state = .index,
-                    '=' => tok.state = .value,
-                    '\n' => {
-                        tok.state = .start;
-                        return Token.invalid(tok.str[tok.start .. tok.i + 1]);
-                    },
-                    else => tok.state = .invalid,
-                },
-                .field => switch (tok.str[tok.i]) {
-                    '.' => {
-                        const res = Token.field(tok.str[tok.start + 1 .. tok.i]);
-                        tok.start = tok.i;
-                        return res;
-                    },
-                    '[' => {
-                        const res = Token.field(tok.str[tok.start + 1 .. tok.i]);
-                        tok.start = tok.i;
-                        tok.state = .index;
-                        return res;
-                    },
-                    '=' => {
-                        const res = Token.field(tok.str[tok.start + 1 .. tok.i]);
-                        tok.start = tok.i;
-                        tok.state = .value;
-                        return res;
-                    },
-                    '\n' => {
-                        const res = Token.invalid(tok.str[tok.start .. tok.i + 1]);
-                        tok.start = tok.i + 1;
-                        tok.state = .start;
-                        return res;
-                    },
-                    else => {},
-                },
-                .index => switch (tok.str[tok.i]) {
-                    ']' => {
-                        const res = Token.index(tok.str[tok.start + 1 .. tok.i]);
-                        tok.start = tok.i + 1;
-                        tok.state = .start;
-                        return res;
-                    },
-                    '\n' => {
-                        const res = Token.invalid(tok.str[tok.start .. tok.i + 1]);
-                        tok.start = tok.i + 1;
-                        tok.state = .start;
-                        return res;
-                    },
-                    else => {},
-                },
-                .value => switch (tok.str[tok.i]) {
-                    '\n' => {
-                        const res = Token.value(tok.str[tok.start + 1 .. tok.i]);
-                        tok.start = tok.i + 1;
-                        tok.state = .start;
-                        return res;
-                    },
-                    else => {},
-                },
-                .invalid => switch (tok.str[tok.i]) {
-                    '\n' => {
-                        const res = Token.invalid(tok.str[tok.start .. tok.i + 1]);
-                        tok.start = tok.i + 1;
-                        tok.state = .start;
-                        return res;
-                    },
-                    else => {},
-                },
-            }
-        }
-
-        switch (tok.state) {
-            .start => return Token.end,
-            else => {
-                const res = Token.invalid(tok.str[tok.start..]);
-                tok.state = .start;
-                tok.start = tok.str.len;
-                tok.i = tok.str.len;
-                return res;
-            },
-        }
-    }
-};
-
-pub fn tokenize(str: []const u8) Tokenizer {
-    return .{ .str = str };
-}
-
-fn expectTokens(str: []const u8, results: []const Token) !void {
-    var tok = tokenize(str);
-    for (results) |expect| {
-        const actual = tok.next();
-        try testing.expectEqual(expect.tag, actual.tag);
-        try testing.expectEqualStrings(expect.value, actual.value);
-    }
-}
-
-test "TokenStream" {
-    try expectTokens(".=\n", &.{
-        Token.field(""),
-        Token.value(""),
-        Token.end,
-    });
-    try expectTokens(".a=\n", &.{
-        Token.field("a"),
-        Token.value(""),
-        Token.end,
-    });
-    try expectTokens("[]=\n", &.{
-        Token.index(""),
-        Token.value(""),
-        Token.end,
-    });
-    try expectTokens("[1]=\n", &.{
-        Token.index("1"),
-        Token.value(""),
-        Token.end,
-    });
-    try expectTokens("=\n", &.{
-        Token.value(""),
-        Token.end,
-    });
-    try expectTokens("=a\n", &.{
-        Token.value("a"),
-        Token.end,
-    });
-    try expectTokens(".a.b=c\n", &.{
-        Token.field("a"),
-        Token.field("b"),
-        Token.value("c"),
-        Token.end,
-    });
-    try expectTokens(".a[1]=c\n", &.{
-        Token.field("a"),
-        Token.index("1"),
-        Token.value("c"),
-        Token.end,
-    });
-    try expectTokens(".a.b=c\n.d.e[1]=f\n", &.{
-        Token.field("a"),
-        Token.field("b"),
-        Token.value("c"),
-        Token.field("d"),
-        Token.field("e"),
-        Token.index("1"),
-        Token.value("f"),
-        Token.end,
-    });
-    try expectTokens("a", &.{
-        Token.invalid("a"),
-        Token.end,
-    });
-    try expectTokens("[1]a", &.{
-        Token.index("1"),
-        Token.invalid("a"),
-        Token.end,
-    });
-    try expectTokens("[1]a\n.q=2\n", &.{
-        Token.index("1"),
-        Token.invalid("a\n"),
-        Token.field("q"),
-        Token.value("2"),
-        Token.end,
-    });
-    try expectTokens(".a=0\n[1]a", &.{
-        Token.field("a"),
-        Token.value("0"),
-        Token.index("1"),
-        Token.invalid("a"),
-        Token.end,
-    });
-}
+pub usingnamespace @import("src/tokens.zig");
 
 /// The type ston understands to be an index and will therefor be serialized/deserialized as
 /// such,
@@ -243,8 +23,8 @@ pub fn Index(comptime _IndexType: type, comptime _ValueType: type) type {
     };
 }
 
-pub fn initIndex(index: anytype, value: anytype) Index(@TypeOf(index), @TypeOf(value)) {
-    return .{ .index = index, .value = value };
+pub fn index(i: anytype, value: anytype) Index(@TypeOf(i), @TypeOf(value)) {
+    return .{ .index = i, .value = value };
 }
 
 /// The type ston understands to be a field and will therefor be serialized/deserialized as
@@ -258,26 +38,29 @@ pub fn Field(comptime _ValueType: type) type {
     };
 }
 
-pub fn initField(name: []const u8, value: anytype) Field(@TypeOf(value)) {
+pub fn field(name: []const u8, value: anytype) Field(@TypeOf(value)) {
     return .{ .name = name, .value = value };
 }
 
-/// The type to use if a slice of bytes should be serialized as a string by serialize.
-pub const String = struct {
-    bytes: []const u8,
+/// The type to use to specify that the underlying value is a string. All this type does is
+/// force the `{s}` format specify in its own format function.
+pub fn String(comptime T: type) type {
+    return struct {
+        value: T,
 
-    pub fn format(
-        self: @This(),
-        comptime _: []const u8,
-        __: std.fmt.FormatOptions,
-        writer: anytype,
-    ) @TypeOf(writer).Error!void {
-        try writer.writeAll(self.bytes);
-    }
-};
+        pub fn format(
+            self: @This(),
+            comptime _: []const u8,
+            __: std.fmt.FormatOptions,
+            writer: anytype,
+        ) @TypeOf(writer).Error!void {
+            try writer.print("{s}", .{self.value});
+        }
+    };
+}
 
-pub fn string(str: []const u8) String {
-    return .{ .bytes = str };
+pub fn string(value: anytype) String(@TypeOf(value)) {
+    return .{ .value = value };
 }
 
 const Bool = enum { @"false", @"true" };
@@ -326,14 +109,14 @@ pub const DerserializeLineError = error{
 pub fn deserializeLine(comptime T: type, tok: *Tokenizer) DerserializeLineError!T {
     if (comptime isIndex(T)) {
         const token = try expectToken(tok, .index);
-        const index = fmt.parseInt(T.IndexType, token.value, 0) catch return error.InvalidIndex;
+        const i = fmt.parseInt(T.IndexType, token.value, 0) catch return error.InvalidIndex;
         const value = try deserializeLine(T.ValueType, tok);
-        return initIndex(index, value);
+        return index(i, value);
     }
     if (comptime isField(T)) {
         const token = try expectToken(tok, .field);
         const value = try deserializeLine(T.ValueType, tok);
-        return initField(token.value, value);
+        return field(token.value, value);
     }
 
     switch (T) {
@@ -360,9 +143,9 @@ pub fn deserializeLine(comptime T: type, tok: *Tokenizer) DerserializeLineError!
         },
         .Union => |info| {
             const token = try expectToken(tok, .field);
-            inline for (info.fields) |field| {
-                if (mem.eql(u8, field.name, token.value))
-                    return @unionInit(T, field.name, try deserializeLine(field.field_type, tok));
+            inline for (info.fields) |f| {
+                if (mem.eql(u8, f.name, token.value))
+                    return @unionInit(T, f.name, try deserializeLine(f.field_type, tok));
             }
 
             return error.InvalidField;
@@ -477,11 +260,11 @@ fn serializeHelper(writer: anytype, prefix: *io.FixedBufferStream([]u8), value: 
             const Tag = meta.TagType(T);
             if (@hasDecl(T, "format")) {
                 try writer.print("{s}={}\n", .{ prefix.getWritten(), value });
-            } else inline for (info.fields) |field| {
-                if (@field(Tag, field.name) == value) {
+            } else inline for (info.fields) |f| {
+                if (@field(Tag, f.name) == value) {
                     var copy = prefix.*;
-                    copy.writer().print(".{s}", .{field.name}) catch unreachable;
-                    try serializeHelper(writer, &copy, @field(value, field.name));
+                    copy.writer().print(".{s}", .{f.name}) catch unreachable;
+                    try serializeHelper(writer, &copy, @field(value, f.name));
                     return;
                 }
             }
@@ -489,10 +272,10 @@ fn serializeHelper(writer: anytype, prefix: *io.FixedBufferStream([]u8), value: 
         },
         .Struct => |info| if (@hasDecl(T, "format")) {
             try writer.print("{s}={}\n", .{ prefix.getWritten(), value });
-        } else inline for (info.fields) |field| {
+        } else inline for (info.fields) |f| {
             var copy = prefix.*;
-            copy.writer().print(".{s}", .{field.name}) catch unreachable;
-            try serializeHelper(writer, &copy, @field(value, field.name));
+            copy.writer().print(".{s}", .{f.name}) catch unreachable;
+            try serializeHelper(writer, &copy, @field(value, f.name));
         },
         else => @compileError("Type '" ++ @typeName(T) ++ "' not supported"),
     }
@@ -510,7 +293,7 @@ test "serialize - struct" {
         a: u8 = 1,
         b: enum { a, b } = .a,
         c: bool = false,
-        d: String = string("abcd"),
+        d: String(*const [4:0]u8) = string("abcd"),
         e: Index(u8, u8) = .{ .index = 2, .value = 3 },
         f: union(enum) { a: u8, b: bool } = .{ .a = 2 },
         g: f32 = 1.5,
