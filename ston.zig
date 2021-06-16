@@ -8,6 +8,8 @@ const mem = std.mem;
 const meta = std.meta;
 const testing = std.testing;
 
+pub usingnamespace @import("src/meta.zig");
+
 pub const Token = struct {
     tag: Tag,
     value: []const u8,
@@ -245,17 +247,6 @@ pub fn initIndex(index: anytype, value: anytype) Index(@TypeOf(index), @TypeOf(v
     return .{ .index = index, .value = value };
 }
 
-/// Given a type `T`, when figure out wether or not it is an `Index(G, K)`.
-pub fn isIndex(comptime T: type) bool {
-    if (@typeInfo(T) != .Struct)
-        return false;
-    if (!@hasDecl(T, "IndexType") or !@hasDecl(T, "ValueType"))
-        return false;
-    if (@TypeOf(T.IndexType) != type or @TypeOf(T.ValueType) != type)
-        return false;
-    return T == Index(T.IndexType, T.ValueType);
-}
-
 /// The type ston understands to be a field and will therefor be serialized/deserialized as
 /// such,
 pub fn Field(comptime _ValueType: type) type {
@@ -269,17 +260,6 @@ pub fn Field(comptime _ValueType: type) type {
 
 pub fn initField(name: []const u8, value: anytype) Field(@TypeOf(value)) {
     return .{ .name = name, .value = value };
-}
-
-/// Given a type `T`, when figure out wether or not it is an `Field(K)`.
-pub fn isField(comptime T: type) bool {
-    if (@typeInfo(T) != .Struct)
-        return false;
-    if (!@hasDecl(T, "ValueType"))
-        return false;
-    if (@TypeOf(T.ValueType) != type)
-        return false;
-    return T == Field(T.ValueType);
 }
 
 /// The type to use if a slice of bytes should be serialized as a string by serialize.
@@ -445,6 +425,18 @@ fn serializeHelper(writer: anytype, prefix: *io.FixedBufferStream([]u8), value: 
         try serializeHelper(writer, &copy, value.value);
         return;
     }
+    if (comptime isIntMap(T)) {
+        var it = value.iterator();
+        while (it.next()) |entry| {
+            var copy = prefix.*;
+            copy.writer().print("[{}]", .{entry.key_ptr.*}) catch unreachable;
+            try serializeHelper(writer, &copy, entry.value_ptr.*);
+        }
+        return;
+    }
+    if (comptime isArrayList(T)) {
+        return serializeHelper(writer, prefix, value.items);
+    }
     if (comptime isField(T)) {
         var copy = prefix.*;
         copy.writer().print(".{s}", .{value.name}) catch unreachable;
@@ -513,7 +505,7 @@ fn expectSerialized(str: []const u8, value: anytype) !void {
     try testing.expectEqualStrings(str, fbs.getWritten());
 }
 
-test "serialize" {
+test "serialize - struct" {
     const S = struct {
         a: u8 = 1,
         b: enum { a, b } = .a,
@@ -591,4 +583,52 @@ test "serialize" {
         \\[1][1].i.a=2
         \\
     , [_][2]S{[_]S{.{}} ** 2} ** 2);
+}
+
+test "serialize - HashMap" {
+    var hm = std.AutoHashMap(u8, u8).init(testing.allocator);
+    defer hm.deinit();
+
+    try hm.putNoClobber(2, 3);
+    try hm.putNoClobber(4, 8);
+    try hm.putNoClobber(10, 20);
+
+    try expectSerialized(
+        \\[4]=8
+        \\[10]=20
+        \\[2]=3
+        \\
+    , hm);
+}
+
+test "serialize - ArrayHashMap" {
+    var hm = std.AutoArrayHashMap(u8, u8).init(testing.allocator);
+    defer hm.deinit();
+
+    try hm.putNoClobber(2, 3);
+    try hm.putNoClobber(4, 8);
+    try hm.putNoClobber(10, 20);
+
+    try expectSerialized(
+        \\[2]=3
+        \\[4]=8
+        \\[10]=20
+        \\
+    , hm);
+}
+
+test "serialize - ArrayList" {
+    var list = std.ArrayList(u8).init(testing.allocator);
+    defer list.deinit();
+
+    try list.append(1);
+    try list.append(2);
+    try list.append(3);
+
+    try expectSerialized(
+        \\[0]=1
+        \\[1]=2
+        \\[2]=3
+        \\
+    , list);
 }
