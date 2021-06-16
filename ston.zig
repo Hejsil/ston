@@ -71,27 +71,19 @@ pub const ExpectError = error{
     ExpectedValue,
 };
 
-fn expectToken(tok: *Tokenizer, tag: Token.Tag) ExpectError!Token {
-    var copy = tok.*;
-    const token = copy.next();
+inline fn expectToken(tok: *Tokenizer, tag: Token.Tag) ExpectError!Token {
+    const restore = tok.i;
+    const token = tok.next();
+    if (token.tag == tag)
+        return token;
+
+    tok.i = restore;
     switch (tag) {
-        .field => switch (token.tag) {
-            .field => {},
-            else => return error.ExpectedField,
-        },
-        .index => switch (token.tag) {
-            .index => {},
-            else => return error.ExpectedIndex,
-        },
-        .value => switch (token.tag) {
-            .value => {},
-            else => return error.ExpectedValue,
-        },
+        .field => return error.ExpectedField,
+        .index => return error.ExpectedIndex,
+        .value => return error.ExpectedValue,
         .invalid, .end => unreachable,
     }
-
-    tok.* = copy;
-    return token;
 }
 
 pub const DerserializeLineError = error{
