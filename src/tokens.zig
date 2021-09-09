@@ -37,104 +37,53 @@ pub const Token = struct {
 pub const Tokenizer = struct {
     str: []const u8,
     i: usize = 0,
-    state: enum {
-        start,
-        field,
-        index,
-        value,
-    } = .start,
 
     pub fn next(tok: *Tokenizer) Token {
-        var start = tok.i;
+        if (tok.i >= tok.str.len)
+            return Token.end;
 
-        if (tok.state == .start and tok.i < tok.str.len) {
-            defer tok.i += 1;
-            switch (tok.str[tok.i]) {
-                '.' => {
-                    tok.state = .field;
-                    start += 1;
+        const start = tok.i;
+        tok.i += 1;
+        switch (tok.str[tok.i - 1]) {
+            '.' => while (tok.i < tok.str.len) : (tok.i += 1) switch (tok.str[tok.i]) {
+                '.', '[', '=' => return Token.field(tok.str[start + 1 .. tok.i]),
+                '\n' => {
+                    tok.i += 1;
+                    return Token.invalid(tok.str[start..tok.i]);
                 },
-                '[' => {
-                    tok.state = .index;
-                    start += 1;
+                else => {},
+            },
+            '[' => while (tok.i < tok.str.len) : (tok.i += 1) switch (tok.str[tok.i]) {
+                ']' => {
+                    tok.i += 1;
+                    return Token.index(tok.str[start + 1 .. tok.i - 1]);
                 },
-                '=' => {
-                    tok.state = .value;
-                    start += 1;
+                '\n' => {
+                    tok.i += 1;
+                    return Token.invalid(tok.str[start..tok.i]);
                 },
-                '\n' => return Token.invalid(tok.str[start .. tok.i + 1]),
-
-                // We found an unexpected starting char. The best we can do to recover is
-                // to go to the next line and return everything before as invalid.
-                else => if (mem.indexOfScalarPos(u8, tok.str, tok.i, '\n')) |end| {
-                    tok.i = end;
-                    return Token.invalid(tok.str[start .. end + 1]);
-                } else {
-                    tok.i = tok.str.len;
-                    return Token.invalid(tok.str[start..]);
+                else => {},
+            },
+            '=' => while (tok.i < tok.str.len) : (tok.i += 1) switch (tok.str[tok.i]) {
+                '\n' => {
+                    tok.i += 1;
+                    return Token.value(tok.str[start + 1 .. tok.i - 1]);
                 },
-            }
-        }
-
-        while (tok.i < tok.str.len) {
-            defer tok.i += 1;
-            switch (tok.state) {
-                // We can only be in the `start` state on the first iteration of the loop.
-                // It has therefor been pulled out (see above) which frees this hot loop from
-                // handling that case.
-                .start => unreachable,
-                .field => switch (tok.str[tok.i]) {
-                    '.' => return Token.field(tok.str[start..tok.i]),
-                    '[' => {
-                        const res = Token.field(tok.str[start..tok.i]);
-                        tok.state = .index;
-                        return res;
-                    },
-                    '=' => {
-                        const res = Token.field(tok.str[start..tok.i]);
-                        tok.state = .value;
-                        return res;
-                    },
-                    '\n' => {
-                        const res = Token.invalid(tok.str[start - 1 .. tok.i + 1]);
-                        tok.state = .start;
-                        return res;
-                    },
-                    else => {},
+                else => {},
+            },
+            '\n' => return Token.invalid(tok.str[start .. tok.i + 1]),
+            else => while (tok.i < tok.str.len) : (tok.i += 1) switch (tok.str[tok.i]) {
+                '\n' => {
+                    tok.i += 1;
+                    return Token.invalid(tok.str[start..tok.i]);
                 },
-                .index => switch (tok.str[tok.i]) {
-                    ']' => {
-                        const res = Token.index(tok.str[start..tok.i]);
-                        tok.state = .start;
-                        return res;
-                    },
-                    '\n' => {
-                        const res = Token.invalid(tok.str[start - 1 .. tok.i + 1]);
-                        tok.state = .start;
-                        return res;
-                    },
-                    else => {},
-                },
-                .value => switch (tok.str[tok.i]) {
-                    '\n' => {
-                        const res = Token.value(tok.str[start..tok.i]);
-                        tok.state = .start;
-                        return res;
-                    },
-                    else => {},
-                },
-            }
-        }
-
-        switch (tok.state) {
-            .start => return Token.end,
-            else => {
-                const res = Token.invalid(tok.str[start..]);
-                tok.state = .start;
-                tok.i = tok.str.len;
-                return res;
+                else => {},
             },
         }
+
+        const res = Token.invalid(tok.str[start..]);
+        tok.i = tok.str.len;
+        return res;
     }
 };
 
