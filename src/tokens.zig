@@ -1,5 +1,6 @@
 const std = @import("std");
 
+const mem = std.mem;
 const testing = std.testing;
 
 pub const Token = struct {
@@ -35,51 +36,67 @@ pub const Token = struct {
 
 pub const Tokenizer = struct {
     str: []const u8,
-    start: usize = 0,
     i: usize = 0,
     state: enum {
         start,
         field,
         index,
         value,
-        invalid,
     } = .start,
 
     pub fn next(tok: *Tokenizer) Token {
+        var start = tok.i;
+
+        if (tok.state == .start and tok.i < tok.str.len) {
+            defer tok.i += 1;
+            switch (tok.str[tok.i]) {
+                '.' => {
+                    tok.state = .field;
+                    start += 1;
+                },
+                '[' => {
+                    tok.state = .index;
+                    start += 1;
+                },
+                '=' => {
+                    tok.state = .value;
+                    start += 1;
+                },
+                '\n' => return Token.invalid(tok.str[start .. tok.i + 1]),
+
+                // We found an unexpected starting char. The best we can do to recover is
+                // to go to the next line and return everything before as invalid.
+                else => if (mem.indexOfScalarPos(u8, tok.str, tok.i, '\n')) |end| {
+                    tok.i = end;
+                    return Token.invalid(tok.str[start .. end + 1]);
+                } else {
+                    tok.i = tok.str.len;
+                    return Token.invalid(tok.str[start..]);
+                },
+            }
+        }
+
         while (tok.i < tok.str.len) {
             defer tok.i += 1;
             switch (tok.state) {
-                .start => switch (tok.str[tok.i]) {
-                    '.' => tok.state = .field,
-                    '[' => tok.state = .index,
-                    '=' => tok.state = .value,
-                    '\n' => {
-                        tok.state = .start;
-                        return Token.invalid(tok.str[tok.start .. tok.i + 1]);
-                    },
-                    else => tok.state = .invalid,
-                },
+                // We can only be in the `start` state on the first iteration of the loop.
+                // It has therefor been pulled out (see above) which frees this hot loop from
+                // handling that case.
+                .start => unreachable,
                 .field => switch (tok.str[tok.i]) {
-                    '.' => {
-                        const res = Token.field(tok.str[tok.start + 1 .. tok.i]);
-                        tok.start = tok.i;
-                        return res;
-                    },
+                    '.' => return Token.field(tok.str[start..tok.i]),
                     '[' => {
-                        const res = Token.field(tok.str[tok.start + 1 .. tok.i]);
-                        tok.start = tok.i;
+                        const res = Token.field(tok.str[start..tok.i]);
                         tok.state = .index;
                         return res;
                     },
                     '=' => {
-                        const res = Token.field(tok.str[tok.start + 1 .. tok.i]);
-                        tok.start = tok.i;
+                        const res = Token.field(tok.str[start..tok.i]);
                         tok.state = .value;
                         return res;
                     },
                     '\n' => {
-                        const res = Token.invalid(tok.str[tok.start .. tok.i + 1]);
-                        tok.start = tok.i + 1;
+                        const res = Token.invalid(tok.str[start - 1 .. tok.i + 1]);
                         tok.state = .start;
                         return res;
                     },
@@ -87,14 +104,12 @@ pub const Tokenizer = struct {
                 },
                 .index => switch (tok.str[tok.i]) {
                     ']' => {
-                        const res = Token.index(tok.str[tok.start + 1 .. tok.i]);
-                        tok.start = tok.i + 1;
+                        const res = Token.index(tok.str[start..tok.i]);
                         tok.state = .start;
                         return res;
                     },
                     '\n' => {
-                        const res = Token.invalid(tok.str[tok.start .. tok.i + 1]);
-                        tok.start = tok.i + 1;
+                        const res = Token.invalid(tok.str[start - 1 .. tok.i + 1]);
                         tok.state = .start;
                         return res;
                     },
@@ -102,17 +117,7 @@ pub const Tokenizer = struct {
                 },
                 .value => switch (tok.str[tok.i]) {
                     '\n' => {
-                        const res = Token.value(tok.str[tok.start + 1 .. tok.i]);
-                        tok.start = tok.i + 1;
-                        tok.state = .start;
-                        return res;
-                    },
-                    else => {},
-                },
-                .invalid => switch (tok.str[tok.i]) {
-                    '\n' => {
-                        const res = Token.invalid(tok.str[tok.start .. tok.i + 1]);
-                        tok.start = tok.i + 1;
+                        const res = Token.value(tok.str[start..tok.i]);
                         tok.state = .start;
                         return res;
                     },
@@ -124,9 +129,8 @@ pub const Tokenizer = struct {
         switch (tok.state) {
             .start => return Token.end,
             else => {
-                const res = Token.invalid(tok.str[tok.start..]);
+                const res = Token.invalid(tok.str[start..]);
                 tok.state = .start;
-                tok.start = tok.str.len;
                 tok.i = tok.str.len;
                 return res;
             },
