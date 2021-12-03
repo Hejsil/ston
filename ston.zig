@@ -8,6 +8,8 @@ const mem = std.mem;
 const meta = std.meta;
 const testing = std.testing;
 
+const ston = @This();
+
 pub usingnamespace @import("src/meta.zig");
 pub usingnamespace @import("src/tokens.zig");
 
@@ -51,7 +53,7 @@ pub fn String(comptime T: type) type {
         pub fn format(
             self: @This(),
             comptime _: []const u8,
-            __: std.fmt.FormatOptions,
+            _: std.fmt.FormatOptions,
             writer: anytype,
         ) @TypeOf(writer).Error!void {
             try writer.print("{s}", .{self.value});
@@ -69,7 +71,7 @@ pub const ExpectError = error{
     ExpectedValue,
 };
 
-inline fn expectToken(tok: *Tokenizer, tag: Token.Tag) ExpectError!Token {
+inline fn expectToken(tok: *ston.Tokenizer, tag: ston.Token.Tag) ExpectError!ston.Token {
     const restore = tok.i;
     const token = tok.next();
     if (token.tag == tag)
@@ -98,14 +100,14 @@ const Bool = enum { @"false", @"true" };
 /// Parses tokens into `T`, where `T` is a union of possible fields/indexs that are valid.
 /// This only deserializes up to the next `Token.Tag.value` token and will then return a `T`
 /// initialized based on what deserialized.
-pub fn deserializeLine(comptime T: type, tok: *Tokenizer) DerserializeLineError!T {
-    if (comptime isIndex(T)) {
+pub fn deserializeLine(comptime T: type, tok: *ston.Tokenizer) DerserializeLineError!T {
+    if (comptime ston.isIndex(T)) {
         const token = try expectToken(tok, .index);
         const i = fmt.parseInt(T.IndexType, token.value, 0) catch return error.InvalidIndex;
         const value = try deserializeLine(T.ValueType, tok);
         return index(i, value);
     }
-    if (comptime isField(T)) {
+    if (comptime ston.isField(T)) {
         const token = try expectToken(tok, .field);
         const value = try deserializeLine(T.ValueType, tok);
         return field(token.value, value);
@@ -150,7 +152,7 @@ pub fn deserializeLine(comptime T: type, tok: *Tokenizer) DerserializeLineError!
 /// A struct that provides an iterator like API over `deserializeLine`.
 pub fn Deserializer(comptime T: type) type {
     return struct {
-        tok: *Tokenizer,
+        tok: *ston.Tokenizer,
         value: ?T = null,
 
         pub fn next(des: *@This()) DerserializeLineError!T {
@@ -163,8 +165,8 @@ pub fn Deserializer(comptime T: type) type {
             return des.value.?;
         }
 
-        fn update(comptime T2: type, ptr: *T2, tok: *Tokenizer) !void {
-            if (comptime isIndex(T2)) {
+        fn update(comptime T2: type, ptr: *T2, tok: *ston.Tokenizer) !void {
+            if (comptime ston.isIndex(T2)) {
                 const token = try expectToken(tok, .index);
                 ptr.index = fmt.parseInt(T2.IndexType, token.value, 0) catch
                     return error.InvalidIndex;
@@ -193,34 +195,34 @@ pub fn Deserializer(comptime T: type) type {
     };
 }
 
-pub fn deserialize(comptime T: type, tok: *Tokenizer) Deserializer(T) {
+pub fn deserialize(comptime T: type, tok: *ston.Tokenizer) Deserializer(T) {
     return .{ .tok = tok };
 }
 
 fn expectDerserializeLine(str: []const u8, comptime T: type, err_expect: DerserializeLineError!T) !void {
-    var tok = tokenize(str);
-    var des_tok = tokenize(str);
+    var tok = ston.tokenize(str);
+    var des_tok = ston.tokenize(str);
     var des = deserialize(T, &des_tok);
     const expect = err_expect catch |err| {
         try testing.expectError(err, deserializeLine(T, &tok));
         try testing.expectError(err, des.next());
-        des_tok = tokenize(str);
+        des_tok = ston.tokenize(str);
         try testing.expectError(err, des.next());
         return;
     };
 
-    try testing.expectEqual(expect, deserializeLine(T, &tok) catch |err| {
+    try testing.expectEqual(expect, deserializeLine(T, &tok) catch {
         try testing.expect(false);
         unreachable;
     });
 
-    try testing.expectEqual(expect, des.next() catch |err| {
+    try testing.expectEqual(expect, des.next() catch {
         try testing.expect(false);
         unreachable;
     });
 
-    des_tok = tokenize(str);
-    try testing.expectEqual(expect, des.next() catch |err| {
+    des_tok = ston.tokenize(str);
+    try testing.expectEqual(expect, des.next() catch {
         try testing.expect(false);
         unreachable;
     });
@@ -260,13 +262,13 @@ pub fn serialize(writer: anytype, value: anytype) !void {
 
 fn serializeHelper(writer: anytype, prefix: *io.FixedBufferStream([]u8), value: anytype) !void {
     const T = @TypeOf(value);
-    if (comptime isIndex(T)) {
+    if (comptime ston.isIndex(T)) {
         var copy = prefix.*;
         copy.writer().print("[{}]", .{value.index}) catch unreachable;
         try serializeHelper(writer, &copy, value.value);
         return;
     }
-    if (comptime isIntMap(T)) {
+    if (comptime ston.isIntMap(T)) {
         var it = value.iterator();
         while (it.next()) |entry| {
             var copy = prefix.*;
@@ -275,10 +277,10 @@ fn serializeHelper(writer: anytype, prefix: *io.FixedBufferStream([]u8), value: 
         }
         return;
     }
-    if (comptime isArrayList(T)) {
+    if (comptime ston.isArrayList(T)) {
         return serializeHelper(writer, prefix, value.items);
     }
-    if (comptime isField(T)) {
+    if (comptime ston.isField(T)) {
         var copy = prefix.*;
         copy.writer().print(".{s}", .{value.name}) catch unreachable;
         try serializeHelper(writer, &copy, value.value);
