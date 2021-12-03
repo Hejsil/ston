@@ -52,10 +52,12 @@ pub fn String(comptime T: type) type {
 
         pub fn format(
             self: @This(),
-            comptime _: []const u8,
-            _: std.fmt.FormatOptions,
+            comptime f: []const u8,
+            opts: std.fmt.FormatOptions,
             writer: anytype,
         ) @TypeOf(writer).Error!void {
+            _ = f;
+            _ = opts;
             try writer.print("{s}", .{self.value});
         }
     };
