@@ -319,7 +319,7 @@ fn serializeHelper(writer: anytype, prefix: *io.FixedBufferStream([]u8), value: 
             try serializeHelper(writer, prefix, string(@tagName(value)));
         },
         .Union => |info| {
-            const Tag = meta.TagType(T);
+            const Tag = meta.Tag(T);
             if (@hasDecl(T, "format")) {
                 try writer.print("{s}={}\n", .{ prefix.getWritten(), value });
             } else inline for (info.fields) |f| {
