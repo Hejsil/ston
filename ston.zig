@@ -10,8 +10,9 @@ const testing = std.testing;
 
 const ston = @This();
 
+pub const Parser = @import("src/Parser.zig");
+
 pub usingnamespace @import("src/meta.zig");
-pub usingnamespace @import("src/tokens.zig");
 
 /// The type ston understands to be an index and will therefor be serialized/deserialized as
 /// such,
@@ -67,27 +68,6 @@ pub fn string(value: anytype) String(@TypeOf(value)) {
     return .{ .value = value };
 }
 
-pub const ExpectError = error{
-    ExpectedField,
-    ExpectedIndex,
-    ExpectedValue,
-};
-
-inline fn expectToken(tok: *ston.Tokenizer, tag: ston.Token.Tag) ExpectError!ston.Token {
-    const restore = tok.i;
-    const token = tok.next();
-    if (token.tag == tag)
-        return token;
-
-    tok.i = restore;
-    switch (tag) {
-        .field => return error.ExpectedField,
-        .index => return error.ExpectedIndex,
-        .value => return error.ExpectedValue,
-        .invalid, .end => unreachable,
-    }
-}
-
 pub const DerserializeLineError = error{
     InvalidBoolValue,
     InvalidEnumValue,
@@ -95,54 +75,48 @@ pub const DerserializeLineError = error{
     InvalidFloatValue,
     InvalidIndex,
     InvalidIntValue,
-} || ExpectError;
+    InvalidValue,
+};
 
 const Bool = enum { @"false", @"true" };
 
-/// Parses tokens into `T`, where `T` is a union of possible fields/indexs that are valid.
-/// This only deserializes up to the next `Token.Tag.value` token and will then return a `T`
+/// Parses parserens into `T`, where `T` is a union of possible fields/indexs that are valid.
+/// This only deserializes up to the next `Token.Tag.value` parseren and will then return a `T`
 /// initialized based on what deserialized.
-pub fn deserializeLine(comptime T: type, tok: *ston.Tokenizer) DerserializeLineError!T {
+pub fn deserializeLine(comptime T: type, parser: *ston.Parser) DerserializeLineError!T {
     if (comptime ston.isIndex(T)) {
-        const token = try expectToken(tok, .index);
-        const i = fmt.parseInt(T.IndexType, token.value, 0) catch return error.InvalidIndex;
-        const value = try deserializeLine(T.ValueType, tok);
+        const i = try parser.index(T.IndexType);
+        const value = try deserializeLine(T.ValueType, parser);
         return index(i, value);
     }
     if (comptime ston.isField(T)) {
-        const token = try expectToken(tok, .field);
-        const value = try deserializeLine(T.ValueType, tok);
-        return field(token.value, value);
+        const name = try parser.anyField();
+        const value = try deserializeLine(T.ValueType, parser);
+        return field(name, value);
     }
 
     switch (T) {
-        []const u8 => return (try expectToken(tok, .value)).value,
-        [*:'\n']const u8 => return (try expectToken(tok, .value)).value[0.. :'\n'].ptr,
+        []const u8, [:'\n']const u8 => return try parser.value(),
+        [*:'\n']const u8 => return (try parser.value()).ptr,
         else => {},
     }
 
     switch (@typeInfo(T)) {
         .Float => {
-            const token = try expectToken(tok, .value);
-            return fmt.parseFloat(T, token.value) catch return error.InvalidFloatValue;
+            const value = parser.value() catch return error.InvalidFloatValue;
+            return fmt.parseFloat(T, value) catch return error.InvalidFloatValue;
         },
-        .Int => {
-            const token = try expectToken(tok, .value);
-            return fmt.parseInt(T, token.value, 0) catch return error.InvalidIntValue;
-        },
-        .Enum => {
-            const token = try expectToken(tok, .value);
-            return meta.stringToEnum(T, token.value) orelse return error.InvalidEnumValue;
-        },
+        .Int => return try parser.intValue(T),
+        .Enum => return try parser.enumValue(T),
         .Bool => {
-            const res = deserializeLine(Bool, tok) catch return error.InvalidBoolValue;
+            const res = deserializeLine(Bool, parser) catch return error.InvalidBoolValue;
             return res == .@"true";
         },
         .Union => |info| {
-            const token = try expectToken(tok, .field);
             inline for (info.fields) |f| {
-                if (mem.eql(u8, f.name, token.value))
-                    return @unionInit(T, f.name, try deserializeLine(f.field_type, tok));
+                if (parser.field(f.name)) |_| {
+                    return @unionInit(T, f.name, try deserializeLine(f.field_type, parser));
+                } else |_| {}
             }
 
             return error.InvalidField;
@@ -154,25 +128,23 @@ pub fn deserializeLine(comptime T: type, tok: *ston.Tokenizer) DerserializeLineE
 /// A struct that provides an iterator like API over `deserializeLine`.
 pub fn Deserializer(comptime T: type) type {
     return struct {
-        tok: *ston.Tokenizer,
+        parser: *ston.Parser,
         value: ?T = null,
 
-        pub fn next(des: *@This()) DerserializeLineError!T {
+        pub inline fn next(des: *@This()) DerserializeLineError!T {
             if (des.value) |*value| {
-                try update(T, value, des.tok);
+                try update(T, value, des.parser);
                 return value.*;
             }
 
-            des.value = try deserializeLine(T, des.tok);
+            des.value = try deserializeLine(T, des.parser);
             return des.value.?;
         }
 
-        fn update(comptime T2: type, ptr: *T2, tok: *ston.Tokenizer) !void {
+        inline fn update(comptime T2: type, ptr: *T2, parser: *ston.Parser) !void {
             if (comptime ston.isIndex(T2)) {
-                const token = try expectToken(tok, .index);
-                ptr.index = fmt.parseInt(T2.IndexType, token.value, 0) catch
-                    return error.InvalidIndex;
-                return update(T2.ValueType, &ptr.value, tok);
+                ptr.index = try parser.index(T2.IndexType);
+                return update(T2.ValueType, &ptr.value, parser);
             }
 
             // Sometimes we can avoid doing parsing work by just checking if the current thing we
@@ -181,39 +153,35 @@ pub fn Deserializer(comptime T: type) type {
                 const info = @typeInfo(T2).Union;
                 inline for (info.fields) |f| {
                     if (ptr.* == @field(info.tag_type.?, f.name)) {
-                        if (mem.startsWith(u8, tok.str[tok.i..], "." ++ f.name ++ "[") or
-                            mem.startsWith(u8, tok.str[tok.i..], "." ++ f.name ++ "=") or
-                            mem.startsWith(u8, tok.str[tok.i..], "." ++ f.name ++ "."))
-                        {
-                            tok.i += f.name.len + 1;
-                            return update(f.field_type, &@field(ptr, f.name), tok);
-                        }
+                        if (parser.field(f.name)) |_| {
+                            return update(f.field_type, &@field(ptr, f.name), parser);
+                        } else |_| {}
                     }
                 }
             }
 
-            ptr.* = try deserializeLine(T2, tok);
+            ptr.* = try deserializeLine(T2, parser);
         }
     };
 }
 
-pub fn deserialize(comptime T: type, tok: *ston.Tokenizer) Deserializer(T) {
-    return .{ .tok = tok };
+pub fn deserialize(comptime T: type, parser: *ston.Parser) Deserializer(T) {
+    return .{ .parser = parser };
 }
 
 fn expectDerserializeLine(str: []const u8, comptime T: type, err_expect: DerserializeLineError!T) !void {
-    var tok = ston.tokenize(str);
-    var des_tok = ston.tokenize(str);
-    var des = deserialize(T, &des_tok);
+    var parser = ston.Parser{ .str = str };
+    var des_parser = ston.Parser{ .str = str };
+    var des = deserialize(T, &des_parser);
     const expect = err_expect catch |err| {
-        try testing.expectError(err, deserializeLine(T, &tok));
+        try testing.expectError(err, deserializeLine(T, &parser));
         try testing.expectError(err, des.next());
-        des_tok = ston.tokenize(str);
+        des_parser = ston.Parser{ .str = str };
         try testing.expectError(err, des.next());
         return;
     };
 
-    try testing.expectEqual(expect, deserializeLine(T, &tok) catch {
+    try testing.expectEqual(expect, deserializeLine(T, &parser) catch {
         try testing.expect(false);
         unreachable;
     });
@@ -223,7 +191,7 @@ fn expectDerserializeLine(str: []const u8, comptime T: type, err_expect: Derseri
         unreachable;
     });
 
-    des_tok = ston.tokenize(str);
+    des_parser = ston.Parser{ .str = str };
     try testing.expectEqual(expect, des.next() catch {
         try testing.expect(false);
         unreachable;
@@ -245,9 +213,9 @@ test "deserializeLine" {
     try expectDerserializeLine(".enu=a\n", T, T{ .enu = .a });
     // try expectDerserializeLine(".string=string\n", T, T{ .string = "string" });
     try expectDerserializeLine(".index[2]=4\n", T, T{ .index = .{ .index = 2, .value = 4 } });
-    try expectDerserializeLine("[1]\n", T, error.ExpectedField);
-    try expectDerserializeLine(".int.a=1\n", T, error.ExpectedValue);
-    try expectDerserializeLine(".index.a=1\n", T, error.ExpectedIndex);
+    try expectDerserializeLine("[1]\n", T, error.InvalidField);
+    try expectDerserializeLine(".int.a=1\n", T, error.InvalidIntValue);
+    try expectDerserializeLine(".index.a=1\n", T, error.InvalidIndex);
     try expectDerserializeLine(".int=q\n", T, error.InvalidIntValue);
     try expectDerserializeLine(".bol=q\n", T, error.InvalidBoolValue);
     try expectDerserializeLine(".enu=q\n", T, error.InvalidEnumValue);
