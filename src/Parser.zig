@@ -17,12 +17,16 @@ pub fn index(parser: *Parser, comptime T: type) !T {
 }
 
 pub fn field(parser: *Parser, comptime name: []const u8) !void {
+    return parser.fieldDedupe(name[0..name.len].*);
+}
+
+fn fieldDedupe(parser: *Parser, comptime name: anytype) !void {
     const str = parser.rest();
 
     comptime std.debug.assert(name.len != 0);
-    if (!startsWith(str, "." ++ name ++ "[") and
-        !startsWith(str, "." ++ name ++ ".") and
-        !startsWith(str, "." ++ name ++ "="))
+    if (!startsWith(str, ("." ++ name ++ "[").*) and
+        !startsWith(str, ("." ++ name ++ ".").*) and
+        !startsWith(str, ("." ++ name ++ "=").*))
         return error.InvalidField;
 
     parser.i += name.len + 1;
@@ -95,12 +99,12 @@ fn intWithSign(parser: *Parser, comptime T: type, comptime sign: Sign, comptime 
     return error.InvalidInt;
 }
 
-pub fn eat(parser: *Parser) ?u8 {
+fn eat(parser: *Parser) ?u8 {
     defer parser.i += 1;
     return parser.peek();
 }
 
-pub fn eatChar(parser: *Parser, char: u8) bool {
+fn eatChar(parser: *Parser, char: u8) bool {
     const first = parser.peek() orelse return false;
     if (first != char)
         return false;
@@ -109,7 +113,7 @@ pub fn eatChar(parser: *Parser, char: u8) bool {
     return true;
 }
 
-pub fn eatRange(parser: *Parser, start: u8, end: u8) ?u8 {
+fn eatRange(parser: *Parser, start: u8, end: u8) ?u8 {
     const char = parser.peek() orelse return null;
     if (char < start or end < char)
         return null;
@@ -118,8 +122,8 @@ pub fn eatRange(parser: *Parser, start: u8, end: u8) ?u8 {
     return char;
 }
 
-pub fn eatString(parser: *Parser, comptime str: []const u8) bool {
-    if (startsWith(parser.rest(), str)) {
+fn eatString(parser: *Parser, comptime str: []const u8) bool {
+    if (startsWith(parser.rest(), str[0..str.len].*)) {
         parser.i += str.len;
         return true;
     }
@@ -127,7 +131,7 @@ pub fn eatString(parser: *Parser, comptime str: []const u8) bool {
     return false;
 }
 
-fn startsWith(str: []const u8, comptime prefix: []const u8) bool {
+fn startsWith(str: []const u8, comptime prefix: anytype) bool {
     if (str.len < prefix.len)
         return false;
 
@@ -136,7 +140,8 @@ fn startsWith(str: []const u8, comptime prefix: []const u8) bool {
     inline while (blk != 0) : (blk /= 2) {
         inline while (i + blk <= prefix.len) : (i += blk) {
             const Int = std.meta.Int(.unsigned, blk * 8);
-            if (@bitCast(Int, str[i..][0..blk].*) != @bitCast(Int, prefix[i..][0..blk].*))
+            if (@bitCast(Int, str[i..][0..blk].*) !=
+                @bitCast(Int, @as([blk]u8, prefix[i..][0..blk].*)))
                 return false;
         }
     }
@@ -144,7 +149,7 @@ fn startsWith(str: []const u8, comptime prefix: []const u8) bool {
     return true;
 }
 
-pub fn peek(parser: *Parser) ?u8 {
+fn peek(parser: *Parser) ?u8 {
     if (parser.str.len <= parser.i)
         return null;
 
