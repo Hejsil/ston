@@ -234,7 +234,9 @@ fn serializeHelper(writer: anytype, prefix: *io.FixedBufferStream([]u8), value: 
     const T = @TypeOf(value);
     if (comptime ston.isIndex(T)) {
         var copy = prefix.*;
-        copy.writer().print("[{}]", .{value.index}) catch unreachable;
+        copy.writer().writeAll("[") catch unreachable;
+        fmt.formatInt(value.index, 10, .lower, .{}, copy.writer()) catch unreachable;
+        copy.writer().writeAll("]") catch unreachable;
         try serializeHelper(writer, &copy, value.value);
         return;
     }
@@ -242,7 +244,9 @@ fn serializeHelper(writer: anytype, prefix: *io.FixedBufferStream([]u8), value: 
         var it = value.iterator();
         while (it.next()) |entry| {
             var copy = prefix.*;
-            copy.writer().print("[{}]", .{entry.key_ptr.*}) catch unreachable;
+            copy.writer().writeAll("[") catch unreachable;
+            fmt.formatInt(entry.key_ptr.*, 10, .lower, .{}, copy.writer()) catch unreachable;
+            copy.writer().writeAll("]") catch unreachable;
             try serializeHelper(writer, &copy, entry.value_ptr.*);
         }
         return;
@@ -252,19 +256,32 @@ fn serializeHelper(writer: anytype, prefix: *io.FixedBufferStream([]u8), value: 
     }
     if (comptime ston.isField(T)) {
         var copy = prefix.*;
-        copy.writer().print(".{s}", .{value.name}) catch unreachable;
+        copy.writer().writeAll(".") catch unreachable;
+        copy.writer().writeAll(value.name) catch unreachable;
         try serializeHelper(writer, &copy, value.value);
         return;
     }
 
     switch (@typeInfo(T)) {
         .Void, .Null => {},
-        .Bool => try serializeHelper(writer, prefix, string(if (value) "true" else "false")),
-        .Int,
-        .Float,
-        .ComptimeInt,
-        .ComptimeFloat,
-        => try writer.print("{s}={d}\n", .{ prefix.getWritten(), value }),
+        .Bool => {
+            try writer.writeAll(prefix.getWritten());
+            try writer.writeAll("=");
+            try writer.writeAll(if (value) "true" else "false");
+            try writer.writeAll("\n");
+        },
+        .Int, .ComptimeInt => {
+            try writer.writeAll(prefix.getWritten());
+            try writer.writeAll("=");
+            try fmt.formatInt(value, 10, .lower, .{}, writer);
+            try writer.writeAll("\n");
+        },
+        .Float, .ComptimeFloat => {
+            try writer.writeAll(prefix.getWritten());
+            try writer.writeAll("=");
+            try fmt.formatFloatDecimal(value, .{}, writer);
+            try writer.writeAll("\n");
+        },
         .Optional => if (value) |v| {
             try serializeHelper(writer, prefix, v);
         } else {},
@@ -272,7 +289,9 @@ fn serializeHelper(writer: anytype, prefix: *io.FixedBufferStream([]u8), value: 
             .One => try serializeHelper(writer, prefix, value.*),
             .Slice => for (value) |v, i| {
                 var copy = prefix.*;
-                copy.writer().print("[{}]", .{i}) catch unreachable;
+                copy.writer().writeAll("[") catch unreachable;
+                fmt.formatInt(i, 10, .lower, .{}, copy.writer()) catch unreachable;
+                copy.writer().writeAll("]") catch unreachable;
                 try serializeHelper(writer, &copy, v);
             },
             else => @compileError("Type '" ++ @typeName(T) ++ "' not supported"),
@@ -281,19 +300,27 @@ fn serializeHelper(writer: anytype, prefix: *io.FixedBufferStream([]u8), value: 
             var l: usize = info.len;
             try serializeHelper(writer, prefix, value[0..l]);
         },
-        .Enum => if (@hasDecl(T, "format")) {
-            try writer.print("{s}={}\n", .{ prefix.getWritten(), value });
-        } else {
-            try serializeHelper(writer, prefix, string(@tagName(value)));
+        .Enum => {
+            try writer.writeAll(prefix.getWritten());
+            try writer.writeAll("=");
+            if (@hasDecl(T, "format")) {
+                try value.format("", .{}, writer);
+            } else {
+                try writer.writeAll(@tagName(value));
+            }
+            try writer.writeAll("\n");
         },
         .Union => |info| {
             const Tag = meta.Tag(T);
             if (@hasDecl(T, "format")) {
-                try writer.print("{s}={}\n", .{ prefix.getWritten(), value });
+                try writer.writeAll(prefix.getWritten());
+                try writer.writeAll("=");
+                try value.format("", .{}, writer);
+                try writer.writeAll("\n");
             } else inline for (info.fields) |f| {
                 if (@field(Tag, f.name) == value) {
                     var copy = prefix.*;
-                    copy.writer().print(".{s}", .{f.name}) catch unreachable;
+                    copy.writer().writeAll("." ++ f.name) catch unreachable;
                     try serializeHelper(writer, &copy, @field(value, f.name));
                     return;
                 }
@@ -301,10 +328,13 @@ fn serializeHelper(writer: anytype, prefix: *io.FixedBufferStream([]u8), value: 
             unreachable;
         },
         .Struct => |info| if (@hasDecl(T, "format")) {
-            try writer.print("{s}={}\n", .{ prefix.getWritten(), value });
+            try writer.writeAll(prefix.getWritten());
+            try writer.writeAll("=");
+            try value.format("", .{}, writer);
+            try writer.writeAll("\n");
         } else inline for (info.fields) |f| {
             var copy = prefix.*;
-            copy.writer().print(".{s}", .{f.name}) catch unreachable;
+            copy.writer().writeAll("." ++ f.name) catch unreachable;
             try serializeHelper(writer, &copy, @field(value, f.name));
         },
         else => @compileError("Type '" ++ @typeName(T) ++ "' not supported"),
