@@ -78,7 +78,7 @@ pub const DerserializeLineError = error{
     InvalidValue,
 };
 
-const Bool = enum { @"false", @"true" };
+const Bool = enum(u1) { @"false" = 0, @"true" = 1 };
 
 /// Parses parserens into `T`, where `T` is a union of possible fields/indexs that are valid.
 /// This only deserializes up to the next `Token.Tag.value` parseren and will then return a `T`
@@ -129,16 +129,11 @@ pub fn deserializeLine(comptime T: type, parser: *ston.Parser) DerserializeLineE
 pub fn Deserializer(comptime T: type) type {
     return struct {
         parser: *ston.Parser,
-        value: ?T = null,
+        value: T = default(T),
 
         pub inline fn next(des: *@This()) DerserializeLineError!T {
-            if (des.value) |*value| {
-                try update(T, value, des.parser);
-                return value.*;
-            }
-
-            des.value = try deserializeLine(T, des.parser);
-            return des.value.?;
+            try update(T, &des.value, des.parser);
+            return des.value;
         }
 
         inline fn update(comptime T2: type, ptr: *T2, parser: *ston.Parser) !void {
@@ -162,6 +157,43 @@ pub fn Deserializer(comptime T: type) type {
 
             ptr.* = try deserializeLine(T2, parser);
         }
+
+        fn default(comptime T2: type) T2 {
+            switch (@typeInfo(T2)) {
+                .Int, .Float => return @as(T2, 0),
+                .Enum => |info| return @field(T2, info.fields[0].name),
+                .Void => return {},
+                .Bool => return false,
+                .Optional, .Null => return null,
+                .Struct => |struct_info| {
+                    var res: T = undefined;
+                    inline for (struct_info.fields) |f|
+                        @field(res, f.name) = default(@TypeOf(@field(res, f.name)));
+                    return res;
+                },
+                .Pointer => |ptr_info| {
+                    switch (ptr_info.size) {
+                        .Slice => return &[_]ptr_info.child{},
+                        .C => return null,
+                        .One, .Many => @compileError("Can't set a non nullable pointer to zero."),
+                    }
+                },
+                .Array => |info| {
+                    if (info.sentinel) |sentinel| {
+                        return [_:sentinel]info.child{default(info.child)} ** info.len;
+                    }
+                    return [_]info.child{default(info.child)} ** info.len;
+                },
+                .Vector => |info| {
+                    return @splat(info.len, default(info.child));
+                },
+                .Union => |info| {
+                    const field_0 = info.fields[0];
+                    return @unionInit(T2, field_0.name, default(field_0.field_type));
+                },
+                else => @compileError("Can't set a " ++ @typeName(T) ++ " to zero."),
+            }
+        }
     };
 }
 
@@ -169,7 +201,7 @@ pub fn deserialize(comptime T: type, parser: *ston.Parser) Deserializer(T) {
     return .{ .parser = parser };
 }
 
-fn expectDerserializeLine(str: []const u8, comptime T: type, err_expect: DerserializeLineError!T) !void {
+fn expectDerserializeLine(str: [:0]const u8, comptime T: type, err_expect: DerserializeLineError!T) !void {
     var parser = ston.Parser{ .str = str };
     var des_parser = ston.Parser{ .str = str };
     var des = deserialize(T, &des_parser);
