@@ -10,7 +10,9 @@ const testing = std.testing;
 
 const ston = @This();
 
-pub const Parser = @import("src/Parser.zig");
+const parse = @import("src/parse.zig");
+
+pub const Parser = parse.Parser(.{});
 
 pub usingnamespace @import("src/meta.zig");
 
@@ -84,14 +86,29 @@ const Bool = enum(u1) { @"false" = 0, @"true" = 1 };
 /// This only deserializes up to the next `Token.Tag.value` parseren and will then return a `T`
 /// initialized based on what deserialized.
 pub fn deserializeLine(comptime T: type, parser: *ston.Parser) DerserializeLineError!T {
+    // const max = comptime deserializeMaxLenFinit(T);
+    // if (parser.hasBytesLeft(max)) {
+    //     return deserializeLineAssert(T, parser.assertBoundsCheck(true));
+    // } else {
+    return deserializeLineAssert(T, parser);
+    // }
+}
+
+fn deserializeLineAssert(comptime T: type, parser: anytype) DerserializeLineError!T {
     if (comptime ston.isIndex(T)) {
         const i = try parser.index(T.IndexType);
-        const value = try deserializeLine(T.ValueType, parser);
+        const value = try deserializeLineAssert(
+            T.ValueType,
+            parser.assertPrefixEaten(false),
+        );
         return index(i, value);
     }
     if (comptime ston.isField(T)) {
         const name = try parser.anyField();
-        const value = try deserializeLine(T.ValueType, parser);
+        const value = try deserializeLine(
+            T.ValueType,
+            parser.assert(.{}),
+        );
         return field(name, value);
     }
 
@@ -109,19 +126,82 @@ pub fn deserializeLine(comptime T: type, parser: *ston.Parser) DerserializeLineE
         .Int => return try parser.intValue(T),
         .Enum => return try parser.enumValue(T),
         .Bool => {
-            const res = deserializeLine(Bool, parser) catch return error.InvalidBoolValue;
+            const res = deserializeLineAssert(Bool, parser) catch return error.InvalidBoolValue;
             return res == .@"true";
         },
         .Union => |info| {
             inline for (info.fields) |f| {
-                if (parser.field(f.name)) |_| {
-                    return @unionInit(T, f.name, try deserializeLine(f.field_type, parser));
-                } else |_| {}
+                const first_child_char = comptime deserializeFirstChar(f.field_type);
+                if (parser.field(f.name ++ [_]u8{first_child_char})) {
+                    return @unionInit(T, f.name, try deserializeLineAssert(
+                        f.field_type,
+                        parser.assertPrefixEaten(true),
+                    ));
+                }
             }
 
             return error.InvalidField;
         },
         else => @compileError("'" ++ @typeName(T) ++ "' is not supported"),
+    }
+}
+
+fn deserializeFirstChar(comptime T: type) u8 {
+    if (comptime ston.isIndex(T))
+        return '[';
+    if (comptime ston.isField(T))
+        return '.';
+    switch (T) {
+        []const u8,
+        [:'\n']const u8,
+        [*:'\n']const u8,
+        => return '=',
+        else => {},
+    }
+
+    switch (@typeInfo(T)) {
+        .Enum, .Float, .Int, .Bool => return '=',
+        .Union => return '.',
+        else => @compileError("Type '" ++ @typeName(T) ++ "' not supported"),
+    }
+}
+
+/// Figures out the maximum finit number of bytes required to deserialize a T. T requires an
+/// infinit number of bytes maximum, the biggest finit value is returned.
+pub fn deserializeMaxLenFinit(comptime T: type) usize {
+    if (comptime ston.isIndex(T)) {
+        const i = math.max(
+            fmt.count("[{}]", .{math.minInt(T.IndexType)}),
+            fmt.count("[{}]", .{math.maxInt(T.IndexType)}),
+        );
+        return i + deserializeMaxLenFinit(T.ValueType);
+    }
+    if (comptime ston.isField(T))
+        return 1;
+    switch (T) {
+        []const u8,
+        [:'\n']const u8,
+        [*:'\n']const u8,
+        => return 1,
+        else => {},
+    }
+
+    switch (@typeInfo(T)) {
+        .Int, .Float => return 1,
+        .Bool => return deserializeMaxLenFinit(Bool),
+        .Enum => |info| {
+            var res: usize = 0;
+            inline for (info.fields) |f|
+                res = math.max(res, f.name.len);
+            return res + 2;
+        },
+        .Union => |info| {
+            var res: usize = 0;
+            inline for (info.fields) |f|
+                res = math.max(res, f.name.len + deserializeMaxLenFinit(f.field_type));
+            return res + 1;
+        },
+        else => @compileError("Type '" ++ @typeName(T) ++ "' not supported"),
     }
 }
 
@@ -132,14 +212,23 @@ pub fn Deserializer(comptime T: type) type {
         value: T = default(T),
 
         pub inline fn next(des: *@This()) DerserializeLineError!T {
+            // const max = comptime deserializeMaxLenFinit(T);
+            // if (des.parser.hasBytesLeft(max)) {
+            //     try update(T, &des.value, des.parser.assertBoundsCheck(true));
+            // } else {
             try update(T, &des.value, des.parser);
+            // }
             return des.value;
         }
 
-        inline fn update(comptime T2: type, ptr: *T2, parser: *ston.Parser) !void {
+        inline fn update(comptime T2: type, ptr: *T2, parser: anytype) !void {
             if (comptime ston.isIndex(T2)) {
                 ptr.index = try parser.index(T2.IndexType);
-                return update(T2.ValueType, &ptr.value, parser);
+                return update(
+                    T2.ValueType,
+                    &ptr.value,
+                    parser.assertPrefixEaten(false),
+                );
             }
 
             // Sometimes we can avoid doing parsing work by just checking if the current thing we
@@ -148,14 +237,18 @@ pub fn Deserializer(comptime T: type) type {
                 const info = @typeInfo(T2).Union;
                 inline for (info.fields) |f| {
                     if (ptr.* == @field(info.tag_type.?, f.name)) {
-                        if (parser.field(f.name)) |_| {
-                            return update(f.field_type, &@field(ptr, f.name), parser);
-                        } else |_| {}
+                        const first_child_char = comptime deserializeFirstChar(f.field_type);
+                        if (parser.field(f.name ++ [_]u8{first_child_char}))
+                            return update(
+                                f.field_type,
+                                &@field(ptr, f.name),
+                                parser.assertPrefixEaten(true),
+                            );
                     }
                 }
             }
 
-            ptr.* = try deserializeLine(T2, parser);
+            ptr.* = try deserializeLineAssert(T2, parser);
         }
 
         fn default(comptime T2: type) T2 {
@@ -243,11 +336,14 @@ test "deserializeLine" {
     try expectDerserializeLine(".float=2\n", T, T{ .float = 2 });
     try expectDerserializeLine(".bol=true\n", T, T{ .bol = true });
     try expectDerserializeLine(".enu=a\n", T, T{ .enu = .a });
-    // try expectDerserializeLine(".string=string\n", T, T{ .string = "string" });
+
+    const input = ".string=string\n";
+    try expectDerserializeLine(input, T, T{ .string = input[8 .. input.len - 1] });
+
     try expectDerserializeLine(".index[2]=4\n", T, T{ .index = .{ .index = 2, .value = 4 } });
     try expectDerserializeLine("[1]\n", T, error.InvalidField);
-    try expectDerserializeLine(".int.a=1\n", T, error.InvalidIntValue);
-    try expectDerserializeLine(".index.a=1\n", T, error.InvalidIndex);
+    try expectDerserializeLine(".int.a=1\n", T, error.InvalidField);
+    try expectDerserializeLine(".index.a=1\n", T, error.InvalidField);
     try expectDerserializeLine(".int=q\n", T, error.InvalidIntValue);
     try expectDerserializeLine(".bol=q\n", T, error.InvalidBoolValue);
     try expectDerserializeLine(".enu=q\n", T, error.InvalidEnumValue);
