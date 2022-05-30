@@ -45,7 +45,7 @@ pub fn Parser(comptime assertions: Assetions) type {
 
             const res = parser.intWithSign(usize, .pos, ']') catch
                 return error.InvalidIndex;
-            return math.cast(T, res) catch return error.InvalidIndex;
+            return math.cast(T, res) orelse return error.InvalidIndex;
         }
 
         pub fn field(parser: *@This(), comptime name: []const u8) bool {
@@ -117,14 +117,14 @@ pub fn Parser(comptime assertions: Assetions) type {
             };
 
             const first = parser.eatRange('0', '9') orelse return error.InvalidInt;
-            var res = try math.cast(T, first - '0');
+            var res = math.cast(T, first - '0') orelse return error.InvalidInt;
 
             while (true) {
                 const c = parser.eat();
                 switch (c) {
                     '0'...'9' => {
-                        const digit = try math.cast(T, c - '0');
-                        const base = try math.cast(T, @as(u8, 10));
+                        const digit = math.cast(T, c - '0') orelse return error.InvalidInt;
+                        const base = math.cast(T, @as(u8, 10)) orelse return error.InvalidInt;
                         res = try math.mul(T, res, base);
                         res = try add(T, res, digit);
                     },
