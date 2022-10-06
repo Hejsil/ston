@@ -49,21 +49,21 @@ pub fn Parser(comptime assertions: Assetions) type {
         }
 
         pub fn field(parser: *@This(), comptime name: []const u8) bool {
-            return parser.fieldDedupe(name[0..name.len].*);
+            return parser.fieldDedupe(name.len, name[0..name.len].*);
         }
 
-        fn fieldDedupe(parser: *@This(), comptime name: anytype) bool {
+        fn fieldDedupe(parser: *@This(), comptime len: usize, comptime name: [len]u8) bool {
             parser.assertPrefix('.');
             if (assertions.prefix_has_been_eaten) {
-                if (!parser.startsWith(name))
+                if (!parser.startsWith(len, &name))
                     return false;
 
-                parser.i += name.len;
+                parser.advance(len);
             } else {
-                if (!parser.startsWith(("." ++ name).*))
+                if (!parser.startsWith(len + 1, "." ++ name))
                     return false;
 
-                parser.i += name.len + 1;
+                parser.advance(len + 1);
             }
 
             return true;
@@ -73,12 +73,12 @@ pub fn Parser(comptime assertions: Assetions) type {
             parser.assertPrefix('=');
             if (assertions.prefix_has_been_eaten) {
                 inline for (@typeInfo(T).Enum.fields) |f| {
-                    if (parser.eatString(f.name ++ "\n"))
+                    if (parser.eatString(f.name.len + 1, f.name ++ "\n"))
                         return @field(T, f.name);
                 }
             } else {
                 inline for (@typeInfo(T).Enum.fields) |f| {
-                    if (parser.eatString("=" ++ f.name ++ "\n"))
+                    if (parser.eatString(f.name.len + 2, "=" ++ f.name ++ "\n"))
                         return @field(T, f.name);
                 }
             }
@@ -110,27 +110,28 @@ pub fn Parser(comptime assertions: Assetions) type {
         }
 
         const Sign = enum { pos, neg };
-        pub fn intWithSign(parser: *@This(), comptime T: type, comptime sign: Sign, comptime term: u8) !T {
+        pub fn intWithSign(parser: *@This(), comptime T: type, comptime sign: Sign, term: u8) !T {
             const add = switch (sign) {
                 .pos => math.add,
                 .neg => math.sub,
             };
 
-            const first = parser.eatRange('0', '9') orelse return error.InvalidInt;
-            var res = math.cast(T, first - '0') orelse return error.InvalidInt;
+            const first = parser.eat() -% '0';
+            if (first > 9)
+                return error.InvalidInt;
 
+            var res = math.cast(T, first) orelse return error.InvalidInt;
             while (true) {
-                const c = parser.eat();
-                switch (c) {
-                    '0'...'9' => {
-                        const digit = math.cast(T, c - '0') orelse return error.InvalidInt;
-                        const base = math.cast(T, @as(u8, 10)) orelse return error.InvalidInt;
-                        res = try math.mul(T, res, base);
-                        res = try add(T, res, digit);
-                    },
-                    term => return res,
-                    else => return error.InvalidInt,
-                }
+                const c = parser.eat() -% '0';
+                if (c == term -% '0')
+                    return res;
+
+                const base = math.cast(T, @as(u8, 10)) orelse return error.InvalidInt;
+                const digit = math.cast(T, c) orelse return error.InvalidInt;
+                if (digit >= base) return error.InvalidInt;
+
+                res = try math.mul(T, res, base);
+                res = try add(T, res, digit);
             }
         }
 
@@ -148,9 +149,9 @@ pub fn Parser(comptime assertions: Assetions) type {
                 debug.assert(parser.str[parser.i - 1] == prefix);
         }
 
-        fn eatString(parser: *@This(), comptime str: []const u8) bool {
-            if (parser.startsWith(str[0..str.len].*)) {
-                parser.i += str.len;
+        fn eatString(parser: *@This(), comptime len: usize, str: *const [len]u8) bool {
+            if (parser.startsWith(len, str)) {
+                parser.advance(len);
                 return true;
             }
 
@@ -162,7 +163,7 @@ pub fn Parser(comptime assertions: Assetions) type {
             if (char < start or end < char)
                 return null;
 
-            parser.i += 1;
+            parser.advance(1);
             return char;
         }
 
@@ -170,12 +171,12 @@ pub fn Parser(comptime assertions: Assetions) type {
             if (parser.peek() != char)
                 return false;
 
-            parser.i += 1;
+            parser.advance(1);
             return true;
         }
 
         fn eat(parser: *@This()) u8 {
-            defer parser.i += 1;
+            defer parser.advance(1);
             return parser.peek();
         }
 
@@ -183,11 +184,15 @@ pub fn Parser(comptime assertions: Assetions) type {
             return parser.str[parser.i];
         }
 
-        fn startsWith(parser: @This(), comptime prefix: anytype) bool {
-            if (!parser.hasBytesLeft(prefix.len))
+        fn advance(parser: *@This(), num: usize) void {
+            parser.i += num;
+        }
+
+        fn startsWith(parser: @This(), comptime len: usize, prefix: *const [len]u8) bool {
+            if (!parser.hasBytesLeft(len))
                 return false;
 
-            return startsWithStr(parser.str, parser.i, prefix);
+            return fastEql(len, parser.str[parser.i..][0..len], prefix);
         }
 
         pub fn hasBytesLeft(parser: @This(), bytes: usize) bool {
@@ -201,34 +206,29 @@ pub fn Parser(comptime assertions: Assetions) type {
     };
 }
 
-fn startsWithStr(str: []const u8, off: usize, comptime prefix: anytype) bool {
-    if (prefix.len == 0)
+fn fastEql(comptime len: usize, a: *const [len]u8, b: *const [len]u8) bool {
+    if (len == 0)
         return true;
 
     comptime var i = 1;
-    inline while (i <= prefix.len and i <= 64) : (i *= 2) {
-        if (i == prefix.len) {
+    inline while (i <= len and i <= 64) : (i *= 2) {
+        if (i == len) {
             const Int = std.meta.Int(.unsigned, i * 8);
-            const a = @bitCast(Int, @as([i]u8, str[off..][0..i].*));
-            const b = @bitCast(Int, @as([i]u8, prefix[0..i].*));
-            return a == b;
+            const a_int = @bitCast(Int, @as([i]u8, a[0..i].*));
+            const b_int = @bitCast(Int, @as([i]u8, b[0..i].*));
+            return a_int == b_int;
         }
     }
 
     const len_lower = comptime blk: {
         var res: usize = 1;
-        while (res < prefix.len) : (res *= 2) {}
+        while (res < len) : (res *= 2) {}
         break :blk res / 2;
     };
-    const len_upper = comptime blk: {
-        var res: usize = 1;
-        while (len_lower + res < prefix.len) : (res *= 2) {}
-        break :blk res;
-    };
 
-    return startsWithStr(str, off, prefix[0..len_lower].*) and startsWithStr(
-        str,
-        off + (prefix.len - len_upper),
-        prefix[prefix.len - len_upper .. prefix.len].*,
+    return fastEql(len_lower, a[0..len_lower], b[0..len_lower]) and fastEql(
+        len - len_lower,
+        a[len_lower..],
+        b[len_lower..],
     );
 }

@@ -166,7 +166,7 @@ fn deserializeFirstChar(comptime T: type) u8 {
     }
 }
 
-/// Figures out the maximum finit number of bytes required to deserialize a T. T requires an
+/// Figures out the maximum finit number of bytes required to deserialize a T. If T requires an
 /// infinit number of bytes maximum, the biggest finit value is returned.
 pub fn deserializeMaxLenFinit(comptime T: type) usize {
     if (comptime ston.isIndex(T)) {
