@@ -295,33 +295,32 @@ pub fn deserialize(comptime T: type, parser: *ston.Parser) Deserializer(T) {
     return .{ .parser = parser };
 }
 
-fn expectDerserializeLine(str: [:0]const u8, comptime T: type, err_expect: DerserializeLineError!T) !void {
+fn expectDerserialize(
+    str: [:0]const u8,
+    comptime T: type,
+    err_expected: []const DerserializeLineError!T,
+) !void {
     var parser = ston.Parser{ .str = str };
     var des_parser = ston.Parser{ .str = str };
     var des = deserialize(T, &des_parser);
-    const expect = err_expect catch |err| {
-        try testing.expectError(err, deserializeLine(T, &parser));
-        try testing.expectError(err, des.next());
-        des_parser = ston.Parser{ .str = str };
-        try testing.expectError(err, des.next());
-        return;
-    };
 
-    try testing.expectEqual(expect, deserializeLine(T, &parser) catch {
-        try testing.expect(false);
-        unreachable;
-    });
+    for (err_expected) |err_expect| {
+        const expect = err_expect catch |err| {
+            try testing.expectError(err, deserializeLine(T, &parser));
+            try testing.expectError(err, des.next());
+            return;
+        };
 
-    try testing.expectEqual(expect, des.next() catch {
-        try testing.expect(false);
-        unreachable;
-    });
+        try testing.expectEqual(expect, deserializeLine(T, &parser) catch {
+            try testing.expect(false);
+            unreachable;
+        });
 
-    des_parser = ston.Parser{ .str = str };
-    try testing.expectEqual(expect, des.next() catch {
-        try testing.expect(false);
-        unreachable;
-    });
+        try testing.expectEqual(expect, des.next() catch {
+            try testing.expect(false);
+            unreachable;
+        });
+    }
 }
 
 test "deserializeLine" {
@@ -330,26 +329,69 @@ test "deserializeLine" {
         float: f32,
         bol: bool,
         enu: enum { a, b },
-        string: []const u8,
         index: Index(u8, u8),
+        nest: union(enum) {
+            int: u8,
+            float: f32,
+            bol: bool,
+            enu: enum { a, b },
+            index: Index(u8, u8),
+        },
     };
-    try expectDerserializeLine(".int=2\n", T, T{ .int = 2 });
-    try expectDerserializeLine(".float=2\n", T, T{ .float = 2 });
-    try expectDerserializeLine(".bol=true\n", T, T{ .bol = true });
-    try expectDerserializeLine(".enu=a\n", T, T{ .enu = .a });
+    try expectDerserialize(
+        \\.int=2
+        \\.int=3
+        \\.float=2
+        \\.float=3
+        \\.bol=true
+        \\.bol=false
+        \\.enu=a
+        \\.enu=b
+        \\.index[2]=4
+        \\.index[1]=3
+        \\.nest.int=2
+        \\.nest.int=3
+        \\.nest.float=2
+        \\.nest.float=3
+        \\.nest.bol=true
+        \\.nest.bol=false
+        \\.nest.enu=a
+        \\.nest.enu=b
+        \\.nest.index[2]=4
+        \\.nest.index[1]=3
+        \\
+    , T, &.{
+        T{ .int = 2 },
+        T{ .int = 3 },
+        T{ .float = 2 },
+        T{ .float = 3 },
+        T{ .bol = true },
+        T{ .bol = false },
+        T{ .enu = .a },
+        T{ .enu = .b },
+        T{ .index = .{ .index = 2, .value = 4 } },
+        T{ .index = .{ .index = 1, .value = 3 } },
+        T{ .nest = .{ .int = 2 } },
+        T{ .nest = .{ .int = 3 } },
+        T{ .nest = .{ .float = 2 } },
+        T{ .nest = .{ .float = 3 } },
+        T{ .nest = .{ .bol = true } },
+        T{ .nest = .{ .bol = false } },
+        T{ .nest = .{ .enu = .a } },
+        T{ .nest = .{ .enu = .b } },
+        T{ .nest = .{ .index = .{ .index = 2, .value = 4 } } },
+        T{ .nest = .{ .index = .{ .index = 1, .value = 3 } } },
+        error.InvalidField,
+    });
 
-    const input = ".string=string\n";
-    try expectDerserializeLine(input, T, T{ .string = input[8 .. input.len - 1] });
-
-    try expectDerserializeLine(".index[2]=4\n", T, T{ .index = .{ .index = 2, .value = 4 } });
-    try expectDerserializeLine("[1]\n", T, error.InvalidField);
-    try expectDerserializeLine(".int.a=1\n", T, error.InvalidField);
-    try expectDerserializeLine(".index.a=1\n", T, error.InvalidField);
-    try expectDerserializeLine(".int=q\n", T, error.InvalidIntValue);
-    try expectDerserializeLine(".bol=q\n", T, error.InvalidBoolValue);
-    try expectDerserializeLine(".enu=q\n", T, error.InvalidEnumValue);
-    try expectDerserializeLine(".index[q]=q\n", T, error.InvalidIndex);
-    try expectDerserializeLine(".q=q\n", T, error.InvalidField);
+    try expectDerserialize("[1]\n", T, &.{error.InvalidField});
+    try expectDerserialize(".int.a=1\n", T, &.{error.InvalidField});
+    try expectDerserialize(".index.a=1\n", T, &.{error.InvalidField});
+    try expectDerserialize(".int=q\n", T, &.{error.InvalidIntValue});
+    try expectDerserialize(".bol=q\n", T, &.{error.InvalidBoolValue});
+    try expectDerserialize(".enu=q\n", T, &.{error.InvalidEnumValue});
+    try expectDerserialize(".index[q]=q\n", T, &.{error.InvalidIndex});
+    try expectDerserialize(".q=q\n", T, &.{error.InvalidField});
 }
 
 pub fn serialize(writer: anytype, value: anytype) !void {

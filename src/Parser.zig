@@ -12,16 +12,7 @@ pub fn handle(parser: *Parser) Handle(.{}) {
     return .{ .parser = parser };
 }
 
-fn eatRange(parser: *Parser, start: u8, end: u8) ?u8 {
-    const char = parser.peek();
-    if (char < start or end < char)
-        return null;
-
-    parser.advance(1);
-    return char;
-}
-
-fn eatChar(parser: *Parser, char: u8) bool {
+pub fn eatChar(parser: *Parser, char: u8) bool {
     if (parser.peek() != char)
         return false;
 
@@ -29,16 +20,16 @@ fn eatChar(parser: *Parser, char: u8) bool {
     return true;
 }
 
-fn eat(parser: *Parser) u8 {
+pub fn eat(parser: *Parser) u8 {
     defer parser.advance(1);
     return parser.peek();
 }
 
-fn peek(parser: Parser) u8 {
+pub fn peek(parser: Parser) u8 {
     return parser.str[parser.i];
 }
 
-fn advance(parser: *Parser, num: usize) void {
+pub fn advance(parser: *Parser, num: usize) void {
     parser.i += num;
 }
 
