@@ -44,16 +44,26 @@ fn intWithSign(parser: *Parser, comptime T: type, comptime sign: Sign, term: u8)
     if (first > 9)
         return error.InvalidInt;
 
-    var res = math.cast(T, first) orelse return error.InvalidInt;
+    var res: T = math.cast(T, first) orelse return error.InvalidInt;
+    const second = parser.eat() -% '0';
+    if (second == term -% '0')
+        return res;
+
+    const base = math.cast(T, @as(u8, 10)) orelse return error.InvalidInt;
+    const second_digit = math.cast(T, second) orelse return error.InvalidInt;
+    if (second_digit > 9)
+        return error.InvalidInt;
+
+    res = try math.mul(T, res, base);
+    res = try add(T, res, second_digit);
+
     while (true) {
         const c = parser.eat();
         if (c == term)
             return res;
 
-        const base = math.cast(T, @as(u8, 10)) orelse return error.InvalidInt;
         const digit = math.cast(T, c -% '0') orelse return error.InvalidInt;
-        if (digit >= base) return error.InvalidInt;
-
+        if (digit > 9) return error.InvalidInt;
         res = try math.mul(T, res, base);
         res = try add(T, res, digit);
     }

@@ -222,7 +222,7 @@ pub fn Deserializer(comptime T: type) type {
 
         fn update(comptime T2: type, ptr: *T2, parser: anytype) !void {
             if (comptime ston.isIndex(T2)) {
-                ptr.index = try parser.index(T2.IndexType);
+                ptr.index = parser.index(T2.IndexType) catch return error.InvalidIndex;
                 return update(
                     T2.ValueType,
                     &ptr.value,
@@ -304,7 +304,7 @@ fn expectDerserialize(
     var des_parser = ston.Parser{ .str = str };
     var des = deserialize(T, &des_parser);
 
-    for (err_expected) |err_expect| {
+    for (err_expected) |err_expect, i| {
         const expect = err_expect catch |err| {
             try testing.expectError(err, deserializeLine(T, &parser));
             try testing.expectError(err, des.next());
@@ -312,12 +312,12 @@ fn expectDerserialize(
         };
 
         try testing.expectEqual(expect, deserializeLine(T, &parser) catch {
-            try testing.expect(false);
+            try testing.expectEqual(err_expected.len, i);
             unreachable;
         });
 
         try testing.expectEqual(expect, des.next() catch {
-            try testing.expect(false);
+            try testing.expectEqual(err_expected.len, i);
             unreachable;
         });
     }
