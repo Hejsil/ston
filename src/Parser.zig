@@ -45,12 +45,12 @@ fn intWithSign(parser: *Parser, comptime T: type, comptime sign: Sign, term: u8)
         return error.InvalidInt;
 
     var res: T = math.cast(T, first) orelse return error.InvalidInt;
-    const second = parser.eat() -% '0';
-    if (second == term -% '0')
+    const second = parser.eat();
+    if (second == term)
         return res;
 
     const base = math.cast(T, @as(u8, 10)) orelse return error.InvalidInt;
-    const second_digit = math.cast(T, second) orelse return error.InvalidInt;
+    const second_digit = math.cast(T, second -% '0') orelse return error.InvalidInt;
     if (second_digit > 9)
         return error.InvalidInt;
 
