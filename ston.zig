@@ -10,9 +10,7 @@ const testing = std.testing;
 
 const ston = @This();
 
-const parse = @import("src/parse.zig");
-
-pub const Parser = parse.Parser(.{});
+pub const Parser = @import("src/Parser.zig");
 
 pub usingnamespace @import("src/meta.zig");
 
@@ -88,9 +86,9 @@ const Bool = enum(u1) { @"false" = 0, @"true" = 1 };
 pub fn deserializeLine(comptime T: type, parser: *ston.Parser) DerserializeLineError!T {
     // const max = comptime deserializeMaxLenFinit(T);
     // if (parser.hasBytesLeft(max)) {
-    //     return deserializeLineAssert(T, parser.assertBoundsCheck(true));
+    //     return deserializeLineAssert(T, parser.assertBoundsChecked(true));
     // } else {
-    return deserializeLineAssert(T, parser);
+    return deserializeLineAssert(T, parser.handle());
     // }
 }
 
@@ -133,10 +131,11 @@ fn deserializeLineAssert(comptime T: type, parser: anytype) DerserializeLineErro
             inline for (info.fields) |f| {
                 const first_child_char = comptime deserializeFirstChar(f.field_type);
                 if (parser.field(f.name ++ [_]u8{first_child_char})) {
-                    return @unionInit(T, f.name, try deserializeLineAssert(
+                    const value = try deserializeLineAssert(
                         f.field_type,
                         parser.assertPrefixEaten(true),
-                    ));
+                    );
+                    return @unionInit(T, f.name, value);
                 }
             }
 
@@ -211,17 +210,17 @@ pub fn Deserializer(comptime T: type) type {
         parser: *ston.Parser,
         value: T = default(T),
 
-        pub inline fn next(des: *@This()) DerserializeLineError!T {
+        pub fn next(des: *@This()) DerserializeLineError!T {
             // const max = comptime deserializeMaxLenFinit(T);
             // if (des.parser.hasBytesLeft(max)) {
-            //     try update(T, &des.value, des.parser.assertBoundsCheck(true));
+            //     try update(T, &des.value, des.parser.assertBoundsChecked(true));
             // } else {
-            try update(T, &des.value, des.parser);
+            try update(T, &des.value, des.parser.handle());
             // }
             return des.value;
         }
 
-        inline fn update(comptime T2: type, ptr: *T2, parser: anytype) !void {
+        fn update(comptime T2: type, ptr: *T2, parser: anytype) !void {
             if (comptime ston.isIndex(T2)) {
                 ptr.index = try parser.index(T2.IndexType);
                 return update(
@@ -235,8 +234,9 @@ pub fn Deserializer(comptime T: type) type {
             // are parsing is the same `field` as what we previously parsed.
             if (@typeInfo(T2) == .Union) {
                 const info = @typeInfo(T2).Union;
+                const tag = std.meta.activeTag(ptr.*);
                 inline for (info.fields) |f| {
-                    if (ptr.* == @field(info.tag_type.?, f.name)) {
+                    if (tag == @field(info.tag_type.?, f.name)) {
                         const first_child_char = comptime deserializeFirstChar(f.field_type);
                         if (parser.field(f.name ++ [_]u8{first_child_char}))
                             return update(
@@ -248,7 +248,8 @@ pub fn Deserializer(comptime T: type) type {
                 }
             }
 
-            ptr.* = try deserializeLineAssert(T2, parser);
+            const value = try deserializeLineAssert(T2, parser);
+            ptr.* = value;
         }
 
         fn default(comptime T2: type) T2 {
@@ -259,7 +260,7 @@ pub fn Deserializer(comptime T: type) type {
                 .Bool => return false,
                 .Optional, .Null => return null,
                 .Struct => |struct_info| {
-                    var res: T = undefined;
+                    var res: T2 = undefined;
                     inline for (struct_info.fields) |f|
                         @field(res, f.name) = default(@TypeOf(@field(res, f.name)));
                     return res;
