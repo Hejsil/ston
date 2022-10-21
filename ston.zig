@@ -84,12 +84,13 @@ const Bool = enum(u1) { @"false" = 0, @"true" = 1 };
 /// This only deserializes up to the next `Token.Tag.value` parseren and will then return a `T`
 /// initialized based on what deserialized.
 pub fn deserializeLine(comptime T: type, parser: *ston.Parser) DerserializeLineError!T {
-    // const max = comptime deserializeMaxLenFinit(T);
-    // if (parser.hasBytesLeft(max)) {
-    //     return deserializeLineAssert(T, parser.assertBoundsChecked(true));
-    // } else {
-    return deserializeLineAssert(T, parser.handle());
-    // }
+    const handle = parser.handle();
+    const max = comptime deserializeMaxLenFinit(T);
+    if (handle.hasBytesLeft(max)) {
+        return deserializeLineAssert(T, handle.assertBoundsChecked(true));
+    } else {
+        return deserializeLineAssert(T, handle);
+    }
 }
 
 fn deserializeLineAssert(comptime T: type, parser: anytype) DerserializeLineError!T {
@@ -211,12 +212,13 @@ pub fn Deserializer(comptime T: type) type {
         value: T = default(T),
 
         pub fn next(des: *@This()) DerserializeLineError!T {
-            // const max = comptime deserializeMaxLenFinit(T);
-            // if (des.parser.hasBytesLeft(max)) {
-            //     try update(T, &des.value, des.parser.assertBoundsChecked(true));
-            // } else {
-            try update(T, &des.value, des.parser.handle());
-            // }
+            const parser = des.parser.handle();
+            const max = comptime deserializeMaxLenFinit(T);
+            if (parser.hasBytesLeft(max)) {
+                try update(T, &des.value, parser.assertBoundsChecked(true));
+            } else {
+                try update(T, &des.value, parser);
+            }
             return des.value;
         }
 

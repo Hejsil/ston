@@ -2,6 +2,7 @@ const std = @import("std");
 
 const debug = std.debug;
 const math = std.math;
+const mem = std.mem;
 
 const Parser = @This();
 
@@ -39,23 +40,31 @@ fn intWithSign(parser: *Parser, comptime T: type, comptime sign: Sign, term: u8)
         .pos => math.add,
         .neg => math.sub,
     };
+    const max_digits = comptime switch (sign) {
+        .pos => std.fmt.count("{}", .{math.maxInt(T)}),
+        .neg => std.fmt.count("{}", .{math.minInt(T)}) - 1,
+    };
+    const base: T = switch (max_digits) {
+        0, 1 => math.maxInt(T),
+        else => 10,
+    };
 
     const first = parser.eat() -% '0';
     if (first > 9)
         return error.InvalidInt;
 
     var res: T = math.cast(T, first) orelse return error.InvalidInt;
-    const second = parser.eat();
-    if (second == term)
-        return res;
+    comptime var i = 1;
+    inline while (i < comptime math.min(4, max_digits) - 1) : (i += 1) {
+        const c = parser.eat();
+        if (c == term)
+            return res;
 
-    const base = math.cast(T, @as(u8, 10)) orelse return error.InvalidInt;
-    const second_digit = math.cast(T, second -% '0') orelse return error.InvalidInt;
-    if (second_digit > 9)
-        return error.InvalidInt;
-
-    res = try math.mul(T, res, base);
-    res = try add(T, res, second_digit);
+        const digit = math.cast(T, c -% '0') orelse return error.InvalidInt;
+        if (digit > 9) return error.InvalidInt;
+        res *= base;
+        res = add(T, res, digit) catch unreachable;
+    }
 
     while (true) {
         const c = parser.eat();
@@ -69,7 +78,7 @@ fn intWithSign(parser: *Parser, comptime T: type, comptime sign: Sign, term: u8)
     }
 }
 
-fn hasBytesLeft(parser: Parser, bytes: usize) bool {
+pub fn hasBytesLeft(parser: Parser, bytes: usize) bool {
     return parser.i + bytes <= parser.str.len;
 }
 
@@ -111,7 +120,8 @@ pub fn Handle(comptime assertions: Assetions) type {
         pub fn index(h: @This(), comptime T: type) !T {
             if (!h.eatPrefix('['))
                 return error.InvalidIndex;
-            return h.parser.intWithSign(T, .pos, ']') catch return error.InvalidIndex;
+            const res = h.parser.intWithSign(usize, .pos, ']') catch return error.InvalidIndex;
+            return math.cast(T, res) orelse return error.InvalidIndex;
         }
 
         pub fn field(h: @This(), comptime name: []const u8) bool {
@@ -166,13 +176,11 @@ pub fn Handle(comptime assertions: Assetions) type {
                 return error.InvalidValue;
 
             const start = h.parser.i;
-            while (true) switch (h.parser.eat()) {
-                '\n' => break,
-                0 => return error.InvalidValue,
-                else => {},
-            };
+            const nl = mem.indexOfScalarPos(u8, h.parser.str, h.parser.i, '\n') orelse
+                return error.InvalidValue;
 
-            return h.parser.str[start .. h.parser.i - 1 :'\n'];
+            h.parser.i = nl + 1;
+            return h.parser.str[start..nl :'\n'];
         }
 
         fn eatPrefix(h: @This(), prefix: u8) bool {
