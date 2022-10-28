@@ -424,6 +424,27 @@ fn serializeHelper(writer: anytype, prefix: *io.FixedBufferStream([]u8), value: 
         }
         return;
     }
+    if (comptime ston.isStringMap(T)) {
+        var it = value.iterator();
+        while (it.next()) |entry| {
+            var copy = prefix.*;
+            copy.writer().writeAll(".") catch unreachable;
+            copy.writer().writeAll(entry.key_ptr.*) catch unreachable;
+            try serializeHelper(writer, &copy, entry.value_ptr.*);
+        }
+        return;
+    }
+    if (comptime ston.isEnumMap(T)) {
+        var _value = value;
+        var it = _value.iterator();
+        while (it.next()) |entry| {
+            var copy = prefix.*;
+            copy.writer().writeAll(".") catch unreachable;
+            copy.writer().writeAll(@tagName(entry.key)) catch unreachable;
+            try serializeHelper(writer, &copy, entry.value.*);
+        }
+        return;
+    }
     if (comptime ston.isArrayList(T)) {
         return serializeHelper(writer, prefix, value.items);
     }
@@ -522,6 +543,20 @@ fn expectSerialized(str: []const u8, value: anytype) !void {
 }
 
 test "serialize - struct" {
+    const E = enum { a, b };
+
+    var sm = std.StringArrayHashMap(u8).init(testing.allocator);
+    defer sm.deinit();
+
+    try sm.putNoClobber("a", 0);
+    try sm.putNoClobber("b", 1);
+
+    var im = std.AutoArrayHashMap(u8, u8).init(testing.allocator);
+    defer im.deinit();
+
+    try im.putNoClobber(3, 5);
+    try im.putNoClobber(4, 6);
+
     const S = struct {
         a: u8 = 1,
         b: enum { a, b } = .a,
@@ -532,6 +567,12 @@ test "serialize - struct" {
         g: f32 = 1.5,
         h: void = {},
         i: Field(u8) = .{ .name = "a", .value = 2 },
+        sm: std.StringArrayHashMap(u8),
+        em: std.EnumMap(E, u8) = std.EnumMap(E, u8).init(.{
+            .a = 0,
+            .b = 1,
+        }),
+        im: std.AutoArrayHashMap(u8, u8),
     };
     try expectSerialized(
         \\.a=1
@@ -542,8 +583,14 @@ test "serialize - struct" {
         \\.f.a=2
         \\.g=1.5
         \\.i.a=2
+        \\.sm.a=0
+        \\.sm.b=1
+        \\.em.a=0
+        \\.em.b=1
+        \\.im[3]=5
+        \\.im[4]=6
         \\
-    , S{});
+    , S{ .sm = sm, .im = im });
     try expectSerialized(
         \\[0].a=1
         \\[0].b=a
@@ -553,6 +600,12 @@ test "serialize - struct" {
         \\[0].f.a=2
         \\[0].g=1.5
         \\[0].i.a=2
+        \\[0].sm.a=0
+        \\[0].sm.b=1
+        \\[0].em.a=0
+        \\[0].em.b=1
+        \\[0].im[3]=5
+        \\[0].im[4]=6
         \\[1].a=1
         \\[1].b=a
         \\[1].c=false
@@ -561,8 +614,14 @@ test "serialize - struct" {
         \\[1].f.a=2
         \\[1].g=1.5
         \\[1].i.a=2
+        \\[1].sm.a=0
+        \\[1].sm.b=1
+        \\[1].em.a=0
+        \\[1].em.b=1
+        \\[1].im[3]=5
+        \\[1].im[4]=6
         \\
-    , [_]S{.{}} ** 2);
+    , [_]S{.{ .sm = sm, .im = im }} ** 2);
 
     try expectSerialized(
         \\[0][0].a=1
@@ -573,6 +632,12 @@ test "serialize - struct" {
         \\[0][0].f.a=2
         \\[0][0].g=1.5
         \\[0][0].i.a=2
+        \\[0][0].sm.a=0
+        \\[0][0].sm.b=1
+        \\[0][0].em.a=0
+        \\[0][0].em.b=1
+        \\[0][0].im[3]=5
+        \\[0][0].im[4]=6
         \\[0][1].a=1
         \\[0][1].b=a
         \\[0][1].c=false
@@ -581,6 +646,12 @@ test "serialize - struct" {
         \\[0][1].f.a=2
         \\[0][1].g=1.5
         \\[0][1].i.a=2
+        \\[0][1].sm.a=0
+        \\[0][1].sm.b=1
+        \\[0][1].em.a=0
+        \\[0][1].em.b=1
+        \\[0][1].im[3]=5
+        \\[0][1].im[4]=6
         \\[1][0].a=1
         \\[1][0].b=a
         \\[1][0].c=false
@@ -589,6 +660,12 @@ test "serialize - struct" {
         \\[1][0].f.a=2
         \\[1][0].g=1.5
         \\[1][0].i.a=2
+        \\[1][0].sm.a=0
+        \\[1][0].sm.b=1
+        \\[1][0].em.a=0
+        \\[1][0].em.b=1
+        \\[1][0].im[3]=5
+        \\[1][0].im[4]=6
         \\[1][1].a=1
         \\[1][1].b=a
         \\[1][1].c=false
@@ -597,8 +674,14 @@ test "serialize - struct" {
         \\[1][1].f.a=2
         \\[1][1].g=1.5
         \\[1][1].i.a=2
+        \\[1][1].sm.a=0
+        \\[1][1].sm.b=1
+        \\[1][1].em.a=0
+        \\[1][1].em.b=1
+        \\[1][1].im[3]=5
+        \\[1][1].im[4]=6
         \\
-    , [_][2]S{[_]S{.{}} ** 2} ** 2);
+    , [_][2]S{[_]S{.{ .sm = sm, .im = im }} ** 2} ** 2);
 }
 
 test "serialize - HashMap" {

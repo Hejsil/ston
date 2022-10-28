@@ -166,6 +166,66 @@ comptime {
     debug.assert(!isIntMap(std.AutoArrayHashMap([2]u8, u8)));
 }
 
+const EnumMapParams = struct {
+    K: type,
+    V: type,
+};
+
+fn enumMapParams(comptime T: type) ?EnumMapParams {
+    if (!@hasDecl(T, "Key") or !@hasDecl(T, "Value"))
+        return null;
+    if (@TypeOf(T.Key) != type or @TypeOf(T.Value) != type)
+        return null;
+
+    return EnumMapParams{ .K = T.Key, .V = T.Value };
+}
+
+pub fn isEnumMap(comptime T: type) bool {
+    if (@typeInfo(T) != .Struct)
+        return false;
+
+    const Params = enumMapParams(T) orelse return false;
+    return std.EnumMap(Params.K, Params.V) == T;
+}
+
+comptime {
+    const E = enum { a, b };
+    debug.assert(!isEnumMap(u8));
+    debug.assert(!isEnumMap(std.AutoHashMap(u8, u8)));
+    debug.assert(!isEnumMap(std.AutoArrayHashMap(u8, u8)));
+    debug.assert(!isEnumMap(std.AutoArrayHashMapUnmanaged(u8, u16)));
+    debug.assert(!isEnumMap(std.AutoHashMap([2]u8, u8)));
+    debug.assert(!isEnumMap(std.AutoArrayHashMap([2]u8, u8)));
+    debug.assert(isEnumMap(std.EnumMap(E, u8)));
+    debug.assert(isEnumMap(std.EnumMap(E, u8)));
+    debug.assert(isEnumMap(std.EnumMap(E, u16)));
+}
+
+pub fn isStringMap(comptime T: type) bool {
+    if (!isMap(T))
+        return false;
+
+    const Params = hashMapParams(T).?;
+    const V = Params.V;
+    return std.StringHashMap(V) == T or
+        std.StringHashMapUnmanaged(V) == T or
+        std.StringArrayHashMap(V) == T or
+        std.StringArrayHashMapUnmanaged(V) == T;
+}
+
+comptime {
+    debug.assert(!isStringMap(u8));
+    debug.assert(!isStringMap(std.AutoHashMap(u8, u8)));
+    debug.assert(!isStringMap(std.AutoArrayHashMap(u8, u8)));
+    debug.assert(!isStringMap(std.AutoArrayHashMapUnmanaged(u8, u16)));
+    debug.assert(!isStringMap(std.AutoHashMap([2]u8, u8)));
+    debug.assert(!isStringMap(std.AutoArrayHashMap([2]u8, u8)));
+    debug.assert(isStringMap(std.StringArrayHashMap(u8)));
+    debug.assert(isStringMap(std.StringArrayHashMapUnmanaged(u8)));
+    debug.assert(isStringMap(std.StringHashMap(u8)));
+    debug.assert(isStringMap(std.StringHashMapUnmanaged(u8)));
+}
+
 pub fn isArrayList(comptime T: type) bool {
     if (@typeInfo(T) != .Struct or !@hasDecl(T, "Slice"))
         return false;
