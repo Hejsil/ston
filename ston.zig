@@ -78,7 +78,7 @@ pub const DerserializeLineError = error{
     InvalidValue,
 };
 
-const Bool = enum(u1) { @"false" = 0, @"true" = 1 };
+const Bool = enum(u1) { false = 0, true = 1 };
 
 /// Parses parserens into `T`, where `T` is a union of possible fields/indexs that are valid.
 /// This only deserializes up to the next `Token.Tag.value` parseren and will then return a `T`
@@ -126,7 +126,7 @@ fn deserializeLineAssert(comptime T: type, parser: anytype) DerserializeLineErro
         .Enum => return try parser.enumValue(T),
         .Bool => {
             const res = deserializeLineAssert(Bool, parser) catch return error.InvalidBoolValue;
-            return res == .@"true";
+            return res == .true;
         },
         .Union => |info| {
             inline for (info.fields) |f| {
