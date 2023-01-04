@@ -130,10 +130,10 @@ fn deserializeLineAssert(comptime T: type, parser: anytype) DerserializeLineErro
         },
         .Union => |info| {
             inline for (info.fields) |f| {
-                const first_child_char = comptime deserializeFirstChar(f.field_type);
+                const first_child_char = comptime deserializeFirstChar(f.type);
                 if (parser.field(f.name ++ [_]u8{first_child_char})) {
                     const value = try deserializeLineAssert(
-                        f.field_type,
+                        f.type,
                         parser.assertPrefixEaten(true),
                     );
                     return @unionInit(T, f.name, value);
@@ -198,7 +198,7 @@ pub fn deserializeMaxLenFinit(comptime T: type) usize {
         .Union => |info| {
             var res: usize = 0;
             inline for (info.fields) |f|
-                res = math.max(res, f.name.len + deserializeMaxLenFinit(f.field_type));
+                res = math.max(res, f.name.len + deserializeMaxLenFinit(f.type));
             return res + 1;
         },
         else => @compileError("Type '" ++ @typeName(T) ++ "' not supported"),
@@ -239,10 +239,10 @@ pub fn Deserializer(comptime T: type) type {
                 const tag = std.meta.activeTag(ptr.*);
                 inline for (info.fields) |f| {
                     if (tag == @field(info.tag_type.?, f.name)) {
-                        const first_child_char = comptime deserializeFirstChar(f.field_type);
+                        const first_child_char = comptime deserializeFirstChar(f.type);
                         if (parser.field(f.name ++ [_]u8{first_child_char}))
                             return update(
-                                f.field_type,
+                                f.type,
                                 &@field(ptr, f.name),
                                 parser.assertPrefixEaten(true),
                             );
@@ -285,7 +285,7 @@ pub fn Deserializer(comptime T: type) type {
                 },
                 .Union => |info| {
                     const field_0 = info.fields[0];
-                    return @unionInit(T2, field_0.name, default(field_0.field_type));
+                    return @unionInit(T2, field_0.name, default(field_0.type));
                 },
                 else => @compileError("Can't set a " ++ @typeName(T) ++ " to zero."),
             }
