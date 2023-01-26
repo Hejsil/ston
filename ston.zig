@@ -78,7 +78,10 @@ pub const DerserializeLineError = error{
     InvalidValue,
 };
 
-const Bool = enum(u1) { false = 0, true = 1 };
+const Bool = enum(u1) {
+    false = @boolToInt(false),
+    true = @boolToInt(true),
+};
 
 /// Parses parserens into `T`, where `T` is a union of possible fields/indexs that are valid.
 /// This only deserializes up to the next `Token.Tag.value` parseren and will then return a `T`
@@ -123,7 +126,15 @@ fn deserializeLineAssert(comptime T: type, parser: anytype) DerserializeLineErro
             return fmt.parseFloat(T, value) catch return error.InvalidFloatValue;
         },
         .Int => return try parser.intValue(T),
-        .Enum => return try parser.enumValue(T),
+        .Enum => |info| {
+            return parser.enumValue(T) catch |err| {
+                if (info.is_exhaustive)
+                    return err;
+
+                const int = parser.intValue(info.tag_type) catch return err;
+                return @intToEnum(T, int);
+            };
+        },
         .Bool => {
             const res = deserializeLineAssert(Bool, parser) catch return error.InvalidBoolValue;
             return res == .true;
@@ -326,17 +337,21 @@ fn expectDerserialize(
 }
 
 test "deserializeLine" {
+    const E2 = enum(u8) { a = 0, b = 1, _ };
+
     const T = union(enum) {
         int: u8,
         float: f32,
-        bol: bool,
-        enu: enum { a, b },
+        bool1: bool,
+        enum1: enum { a, b },
+        enum2: E2,
         index: Index(u8, u8),
         nest: union(enum) {
             int: u8,
             float: f32,
-            bol: bool,
-            enu: enum { a, b },
+            bool1: bool,
+            enum1: enum { a, b },
+            enum2: E2,
             index: Index(u8, u8),
         },
     };
@@ -345,20 +360,26 @@ test "deserializeLine" {
         \\.int=3
         \\.float=2
         \\.float=3
-        \\.bol=true
-        \\.bol=false
-        \\.enu=a
-        \\.enu=b
+        \\.bool1=true
+        \\.bool1=false
+        \\.enum1=a
+        \\.enum1=b
+        \\.enum2=a
+        \\.enum2=b
+        \\.enum2=2
         \\.index[2]=4
         \\.index[1]=3
         \\.nest.int=2
         \\.nest.int=3
         \\.nest.float=2
         \\.nest.float=3
-        \\.nest.bol=true
-        \\.nest.bol=false
-        \\.nest.enu=a
-        \\.nest.enu=b
+        \\.nest.bool1=true
+        \\.nest.bool1=false
+        \\.nest.enum1=a
+        \\.nest.enum1=b
+        \\.nest.enum2=a
+        \\.nest.enum2=b
+        \\.nest.enum2=2
         \\.nest.index[2]=4
         \\.nest.index[1]=3
         \\
@@ -367,20 +388,26 @@ test "deserializeLine" {
         T{ .int = 3 },
         T{ .float = 2 },
         T{ .float = 3 },
-        T{ .bol = true },
-        T{ .bol = false },
-        T{ .enu = .a },
-        T{ .enu = .b },
+        T{ .bool1 = true },
+        T{ .bool1 = false },
+        T{ .enum1 = .a },
+        T{ .enum1 = .b },
+        T{ .enum2 = .a },
+        T{ .enum2 = .b },
+        T{ .enum2 = @intToEnum(E2, 2) },
         T{ .index = .{ .index = 2, .value = 4 } },
         T{ .index = .{ .index = 1, .value = 3 } },
         T{ .nest = .{ .int = 2 } },
         T{ .nest = .{ .int = 3 } },
         T{ .nest = .{ .float = 2 } },
         T{ .nest = .{ .float = 3 } },
-        T{ .nest = .{ .bol = true } },
-        T{ .nest = .{ .bol = false } },
-        T{ .nest = .{ .enu = .a } },
-        T{ .nest = .{ .enu = .b } },
+        T{ .nest = .{ .bool1 = true } },
+        T{ .nest = .{ .bool1 = false } },
+        T{ .nest = .{ .enum1 = .a } },
+        T{ .nest = .{ .enum1 = .b } },
+        T{ .nest = .{ .enum2 = .a } },
+        T{ .nest = .{ .enum2 = .b } },
+        T{ .nest = .{ .enum2 = @intToEnum(E2, 2) } },
         T{ .nest = .{ .index = .{ .index = 2, .value = 4 } } },
         T{ .nest = .{ .index = .{ .index = 1, .value = 3 } } },
         error.InvalidField,
@@ -390,8 +417,9 @@ test "deserializeLine" {
     try expectDerserialize(".int.a=1\n", T, &.{error.InvalidField});
     try expectDerserialize(".index.a=1\n", T, &.{error.InvalidField});
     try expectDerserialize(".int=q\n", T, &.{error.InvalidIntValue});
-    try expectDerserialize(".bol=q\n", T, &.{error.InvalidBoolValue});
-    try expectDerserialize(".enu=q\n", T, &.{error.InvalidEnumValue});
+    try expectDerserialize(".bool1=q\n", T, &.{error.InvalidBoolValue});
+    try expectDerserialize(".enum1=q\n", T, &.{error.InvalidEnumValue});
+    try expectDerserialize(".enum2=q\n", T, &.{error.InvalidEnumValue});
     try expectDerserialize(".index[q]=q\n", T, &.{error.InvalidIndex});
     try expectDerserialize(".q=q\n", T, &.{error.InvalidField});
 }
@@ -458,12 +486,7 @@ fn serializeHelper(writer: anytype, prefix: *io.FixedBufferStream([]u8), value: 
 
     switch (@typeInfo(T)) {
         .Void, .Null => {},
-        .Bool => {
-            try writer.writeAll(prefix.getWritten());
-            try writer.writeAll("=");
-            try writer.writeAll(if (value) "true" else "false");
-            try writer.writeAll("\n");
-        },
+        .Bool => try serializeHelper(writer, prefix, @intToEnum(Bool, @boolToInt(value))),
         .Int, .ComptimeInt => {
             try writer.writeAll(prefix.getWritten());
             try writer.writeAll("=");
@@ -494,14 +517,27 @@ fn serializeHelper(writer: anytype, prefix: *io.FixedBufferStream([]u8), value: 
             var l: usize = info.len;
             try serializeHelper(writer, prefix, value[0..l]);
         },
-        .Enum => {
+        .Enum => |info| {
             try writer.writeAll(prefix.getWritten());
             try writer.writeAll("=");
             if (@hasDecl(T, "format")) {
                 try value.format("", .{}, writer);
-            } else {
+            } else if (info.is_exhaustive) {
                 try writer.writeAll(@tagName(value));
             }
+            // Non exhaustive enums might be something that is not the tag. First, we see if
+            // it is a tag, and write the tag name.
+            else for (meta.tags(T)) |tag| {
+                if (tag == value) {
+                    try writer.writeAll(@tagName(value));
+                    break;
+                }
+            }
+            // If that failes, write the int value of the enum instead.
+            else {
+                try fmt.formatInt(@enumToInt(value), 10, .lower, .{}, writer);
+            }
+
             try writer.writeAll("\n");
         },
         .Union => |info| {
@@ -543,7 +579,8 @@ fn expectSerialized(str: []const u8, value: anytype) !void {
 }
 
 test "serialize - struct" {
-    const E = enum { a, b };
+    const E1 = enum { a, b };
+    const E2 = enum(u8) { a = 0, b = 1, _ };
 
     var sm = std.StringArrayHashMap(u8).init(testing.allocator);
     defer sm.deinit();
@@ -567,8 +604,10 @@ test "serialize - struct" {
         g: f32 = 1.5,
         h: void = {},
         i: Field(u8) = .{ .name = "a", .value = 2 },
+        j: E2 = .a,
+        k: E2 = @intToEnum(E2, 2),
         sm: std.StringArrayHashMap(u8),
-        em: std.EnumMap(E, u8) = std.EnumMap(E, u8).init(.{
+        em: std.EnumMap(E1, u8) = std.EnumMap(E1, u8).init(.{
             .a = 0,
             .b = 1,
         }),
@@ -583,6 +622,8 @@ test "serialize - struct" {
         \\.f.a=2
         \\.g=1.5
         \\.i.a=2
+        \\.j=a
+        \\.k=2
         \\.sm.a=0
         \\.sm.b=1
         \\.em.a=0
@@ -600,6 +641,8 @@ test "serialize - struct" {
         \\[0].f.a=2
         \\[0].g=1.5
         \\[0].i.a=2
+        \\[0].j=a
+        \\[0].k=2
         \\[0].sm.a=0
         \\[0].sm.b=1
         \\[0].em.a=0
@@ -614,6 +657,8 @@ test "serialize - struct" {
         \\[1].f.a=2
         \\[1].g=1.5
         \\[1].i.a=2
+        \\[1].j=a
+        \\[1].k=2
         \\[1].sm.a=0
         \\[1].sm.b=1
         \\[1].em.a=0
@@ -632,6 +677,8 @@ test "serialize - struct" {
         \\[0][0].f.a=2
         \\[0][0].g=1.5
         \\[0][0].i.a=2
+        \\[0][0].j=a
+        \\[0][0].k=2
         \\[0][0].sm.a=0
         \\[0][0].sm.b=1
         \\[0][0].em.a=0
@@ -646,6 +693,8 @@ test "serialize - struct" {
         \\[0][1].f.a=2
         \\[0][1].g=1.5
         \\[0][1].i.a=2
+        \\[0][1].j=a
+        \\[0][1].k=2
         \\[0][1].sm.a=0
         \\[0][1].sm.b=1
         \\[0][1].em.a=0
@@ -660,6 +709,8 @@ test "serialize - struct" {
         \\[1][0].f.a=2
         \\[1][0].g=1.5
         \\[1][0].i.a=2
+        \\[1][0].j=a
+        \\[1][0].k=2
         \\[1][0].sm.a=0
         \\[1][0].sm.b=1
         \\[1][0].em.a=0
@@ -674,6 +725,8 @@ test "serialize - struct" {
         \\[1][1].f.a=2
         \\[1][1].g=1.5
         \\[1][1].i.a=2
+        \\[1][1].j=a
+        \\[1][1].k=2
         \\[1][1].sm.a=0
         \\[1][1].sm.b=1
         \\[1][1].em.a=0
