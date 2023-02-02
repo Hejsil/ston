@@ -200,10 +200,10 @@ pub fn deserializeMaxLenFinit(comptime T: type) usize {
     switch (@typeInfo(T)) {
         .Int, .Float => return 1,
         .Bool => return deserializeMaxLenFinit(Bool),
-        .Enum => |info| {
+        .Enum => {
             var res: usize = 0;
-            inline for (info.fields) |f|
-                res = math.max(res, f.name.len);
+            for (std.meta.tags(T)) |tag|
+                res = math.max(res, @tagName(tag).len);
             return res + 2;
         },
         .Union => |info| {
@@ -245,21 +245,20 @@ pub fn Deserializer(comptime T: type) type {
 
             // Sometimes we can avoid doing parsing work by just checking if the current thing we
             // are parsing is the same `field` as what we previously parsed.
-            if (@typeInfo(T2) == .Union) {
-                const info = @typeInfo(T2).Union;
-                const tag = std.meta.activeTag(ptr.*);
-                inline for (info.fields) |f| {
-                    if (tag == @field(info.tag_type.?, f.name)) {
-                        const first_child_char = comptime deserializeFirstChar(f.type);
-                        if (parser.field(f.name ++ [_]u8{first_child_char}))
-                            return update(
-                                f.type,
-                                &@field(ptr, f.name),
-                                parser.assertPrefixEaten(true),
-                            );
-                    }
-                }
-            }
+            if (@typeInfo(T2) == .Union) switch (ptr.*) {
+                inline else => |*union_field, tag| {
+                    const name = @tagName(tag);
+                    const UnionFieldT = @TypeOf(union_field.*);
+
+                    const first_child_char = comptime deserializeFirstChar(UnionFieldT);
+                    if (parser.field(name ++ [_]u8{first_child_char}))
+                        return update(
+                            UnionFieldT,
+                            union_field,
+                            parser.assertPrefixEaten(true),
+                        );
+                },
+            };
 
             const value = try deserializeLineAssert(T2, parser);
             ptr.* = value;
@@ -527,11 +526,8 @@ fn serializeHelper(writer: anytype, prefix: *io.FixedBufferStream([]u8), value: 
             }
             // Non exhaustive enums might be something that is not the tag. First, we see if
             // it is a tag, and write the tag name.
-            else for (meta.tags(T)) |tag| {
-                if (tag == value) {
-                    try writer.writeAll(@tagName(value));
-                    break;
-                }
+            else if (mem.indexOfScalar(T, meta.tags(T), value)) |_| {
+                try writer.writeAll(@tagName(value));
             }
             // If that failes, write the int value of the enum instead.
             else {
@@ -540,22 +536,17 @@ fn serializeHelper(writer: anytype, prefix: *io.FixedBufferStream([]u8), value: 
 
             try writer.writeAll("\n");
         },
-        .Union => |info| {
-            const Tag = meta.Tag(T);
-            if (@hasDecl(T, "format")) {
-                try writer.writeAll(prefix.getWritten());
-                try writer.writeAll("=");
-                try value.format("", .{}, writer);
-                try writer.writeAll("\n");
-            } else inline for (info.fields) |f| {
-                if (@field(Tag, f.name) == value) {
-                    var copy = prefix.*;
-                    copy.writer().writeAll("." ++ f.name) catch unreachable;
-                    try serializeHelper(writer, &copy, @field(value, f.name));
-                    return;
-                }
-            }
-            unreachable;
+        .Union => if (@hasDecl(T, "format")) {
+            try writer.writeAll(prefix.getWritten());
+            try writer.writeAll("=");
+            try value.format("", .{}, writer);
+            try writer.writeAll("\n");
+        } else switch (value) {
+            inline else => |union_field, tag| {
+                var copy = prefix.*;
+                copy.writer().writeAll("." ++ @tagName(tag)) catch unreachable;
+                try serializeHelper(writer, &copy, union_field);
+            },
         },
         .Struct => |info| if (@hasDecl(T, "format")) {
             try writer.writeAll(prefix.getWritten());
