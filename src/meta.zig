@@ -104,7 +104,7 @@ pub fn isHashMap(comptime T: type) bool {
     if (Params.Hash != u64)
         return false;
 
-    for ([_]void{{}} ** 100) |_, i| {
+    for ([_]void{{}} ** 100, 0..) |_, i| {
         if (T == std.HashMap(Params.K, Params.V, Params.Context, i + 1))
             return true;
     }

@@ -316,7 +316,7 @@ fn expectDerserialize(
     var des_parser = ston.Parser{ .str = str };
     var des = deserialize(T, &des_parser);
 
-    for (err_expected) |err_expect, i| {
+    for (err_expected, 0..) |err_expect, i| {
         const expect = err_expect catch |err| {
             try testing.expectError(err, deserializeLine(T, &parser));
             try testing.expectError(err, des.next());
@@ -503,7 +503,7 @@ fn serializeHelper(writer: anytype, prefix: *io.FixedBufferStream([]u8), value: 
         } else {},
         .Pointer => |info| switch (info.size) {
             .One => try serializeHelper(writer, prefix, value.*),
-            .Slice => for (value) |v, i| {
+            .Slice => for (value, 0..) |v, i| {
                 var copy = prefix.*;
                 copy.writer().writeAll("[") catch unreachable;
                 fmt.formatInt(i, 10, .lower, .{}, copy.writer()) catch unreachable;
