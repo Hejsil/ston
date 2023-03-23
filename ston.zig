@@ -105,14 +105,6 @@ fn deserializeLineAssert(comptime T: type, parser: anytype) DerserializeLineErro
         );
         return index(i, value);
     }
-    if (comptime ston.isField(T)) {
-        const name = try parser.anyField();
-        const value = try deserializeLine(
-            T.ValueType,
-            parser.assert(.{}),
-        );
-        return field(name, value);
-    }
 
     switch (T) {
         []const u8, [:'\n']const u8 => return try parser.value(),
@@ -323,12 +315,12 @@ fn expectDerserialize(
             return;
         };
 
-        try testing.expectEqual(expect, deserializeLine(T, &parser) catch {
+        try testing.expectEqualDeep(expect, deserializeLine(T, &parser) catch {
             try testing.expectEqual(err_expected.len, i);
             unreachable;
         });
 
-        try testing.expectEqual(expect, des.next() catch {
+        try testing.expectEqualDeep(expect, des.next() catch {
             try testing.expectEqual(err_expected.len, i);
             unreachable;
         });
@@ -344,6 +336,7 @@ test "deserializeLine" {
         bool1: bool,
         enum1: enum { a, b },
         enum2: E2,
+        string: []const u8,
         index: Index(u8, u8),
         nest: union(enum) {
             int: u8,
@@ -356,7 +349,8 @@ test "deserializeLine" {
     };
     try expectDerserialize(
         \\.int=2
-        \\.int=3
+        \\.int=30
+        \\.int=255
         \\.float=2
         \\.float=3
         \\.bool1=true
@@ -366,10 +360,13 @@ test "deserializeLine" {
         \\.enum2=a
         \\.enum2=b
         \\.enum2=2
+        \\.string=abc
+        \\.string=abc.def=111
         \\.index[2]=4
         \\.index[1]=3
         \\.nest.int=2
-        \\.nest.int=3
+        \\.nest.int=30
+        \\.nest.int=255
         \\.nest.float=2
         \\.nest.float=3
         \\.nest.bool1=true
@@ -384,7 +381,8 @@ test "deserializeLine" {
         \\
     , T, &.{
         T{ .int = 2 },
-        T{ .int = 3 },
+        T{ .int = 30 },
+        T{ .int = 255 },
         T{ .float = 2 },
         T{ .float = 3 },
         T{ .bool1 = true },
@@ -394,10 +392,13 @@ test "deserializeLine" {
         T{ .enum2 = .a },
         T{ .enum2 = .b },
         T{ .enum2 = @intToEnum(E2, 2) },
+        T{ .string = "abc" },
+        T{ .string = "abc.def=111" },
         T{ .index = .{ .index = 2, .value = 4 } },
         T{ .index = .{ .index = 1, .value = 3 } },
         T{ .nest = .{ .int = 2 } },
-        T{ .nest = .{ .int = 3 } },
+        T{ .nest = .{ .int = 30 } },
+        T{ .nest = .{ .int = 255 } },
         T{ .nest = .{ .float = 2 } },
         T{ .nest = .{ .float = 3 } },
         T{ .nest = .{ .bool1 = true } },
@@ -774,4 +775,8 @@ test "serialize - ArrayList" {
         \\[2]=3
         \\
     , list);
+}
+
+test {
+    testing.refAllDeclsRecursive(@This());
 }
