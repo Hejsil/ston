@@ -738,9 +738,9 @@ test "serialize - HashMap" {
     try hm.putNoClobber(10, 20);
 
     try expectSerialized(
+        \\[2]=3
         \\[4]=8
         \\[10]=20
-        \\[2]=3
         \\
     , hm);
 }
