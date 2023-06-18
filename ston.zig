@@ -173,7 +173,7 @@ fn deserializeFirstChar(comptime T: type) u8 {
 /// infinit number of bytes maximum, the biggest finit value is returned.
 pub fn deserializeMaxLenFinit(comptime T: type) usize {
     if (comptime ston.isIndex(T)) {
-        const i = math.max(
+        const i = @max(
             fmt.count("[{}]", .{math.minInt(T.IndexType)}),
             fmt.count("[{}]", .{math.maxInt(T.IndexType)}),
         );
@@ -195,13 +195,13 @@ pub fn deserializeMaxLenFinit(comptime T: type) usize {
         .Enum => {
             var res: usize = 0;
             for (std.meta.tags(T)) |tag|
-                res = math.max(res, @tagName(tag).len);
+                res = @max(res, @tagName(tag).len);
             return res + 2;
         },
         .Union => |info| {
             var res: usize = 0;
             inline for (info.fields) |f|
-                res = math.max(res, f.name.len + deserializeMaxLenFinit(f.type));
+                res = @max(res, f.name.len + deserializeMaxLenFinit(f.type));
             return res + 1;
         },
         else => @compileError("Type '" ++ @typeName(T) ++ "' not supported"),

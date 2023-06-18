@@ -55,7 +55,7 @@ fn intWithSign(parser: *Parser, comptime T: type, comptime sign: Sign, term: u8)
 
     var res: T = math.cast(T, first) orelse return error.InvalidInt;
     comptime var i = 1;
-    inline while (i < comptime math.min(4, max_digits) - 1) : (i += 1) {
+    inline while (i < comptime @min(4, max_digits) - 1) : (i += 1) {
         const c = parser.eat();
         if (c == term)
             return res;
