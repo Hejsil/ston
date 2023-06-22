@@ -79,8 +79,8 @@ pub const DerserializeLineError = error{
 };
 
 const Bool = enum(u1) {
-    false = @boolToInt(false),
-    true = @boolToInt(true),
+    false = @intFromBool(false),
+    true = @intFromBool(true),
 };
 
 /// Parses parserens into `T`, where `T` is a union of possible fields/indexs that are valid.
@@ -124,7 +124,7 @@ fn deserializeLineAssert(comptime T: type, parser: anytype) DerserializeLineErro
                     return err;
 
                 const int = parser.intValue(info.tag_type) catch return err;
-                return @intToEnum(T, int);
+                return @enumFromInt(T, int);
             };
         },
         .Bool => {
@@ -391,7 +391,7 @@ test "deserializeLine" {
         T{ .enum1 = .b },
         T{ .enum2 = .a },
         T{ .enum2 = .b },
-        T{ .enum2 = @intToEnum(E2, 2) },
+        T{ .enum2 = @enumFromInt(E2, 2) },
         T{ .string = "abc" },
         T{ .string = "abc.def=111" },
         T{ .index = .{ .index = 2, .value = 4 } },
@@ -407,7 +407,7 @@ test "deserializeLine" {
         T{ .nest = .{ .enum1 = .b } },
         T{ .nest = .{ .enum2 = .a } },
         T{ .nest = .{ .enum2 = .b } },
-        T{ .nest = .{ .enum2 = @intToEnum(E2, 2) } },
+        T{ .nest = .{ .enum2 = @enumFromInt(E2, 2) } },
         T{ .nest = .{ .index = .{ .index = 2, .value = 4 } } },
         T{ .nest = .{ .index = .{ .index = 1, .value = 3 } } },
         error.InvalidField,
@@ -486,7 +486,7 @@ fn serializeHelper(writer: anytype, prefix: *io.FixedBufferStream([]u8), value: 
 
     switch (@typeInfo(T)) {
         .Void, .Null => {},
-        .Bool => try serializeHelper(writer, prefix, @intToEnum(Bool, @boolToInt(value))),
+        .Bool => try serializeHelper(writer, prefix, @enumFromInt(Bool, @intFromBool(value))),
         .Int, .ComptimeInt => {
             try writer.writeAll(prefix.getWritten());
             try writer.writeAll("=");
@@ -532,7 +532,7 @@ fn serializeHelper(writer: anytype, prefix: *io.FixedBufferStream([]u8), value: 
             }
             // If that failes, write the int value of the enum instead.
             else {
-                try fmt.formatInt(@enumToInt(value), 10, .lower, .{}, writer);
+                try fmt.formatInt(@intFromEnum(value), 10, .lower, .{}, writer);
             }
 
             try writer.writeAll("\n");
@@ -597,7 +597,7 @@ test "serialize - struct" {
         h: void = {},
         i: Field(u8) = .{ .name = "a", .value = 2 },
         j: E2 = .a,
-        k: E2 = @intToEnum(E2, 2),
+        k: E2 = @enumFromInt(E2, 2),
         sm: std.StringArrayHashMap(u8),
         em: std.EnumMap(E1, u8) = std.EnumMap(E1, u8).init(.{
             .a = 0,
