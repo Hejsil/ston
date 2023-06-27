@@ -232,8 +232,8 @@ fn fastEql(comptime len: usize, a: *const [len]u8, b: *const [len]u8) bool {
     inline while (i <= len and i <= 64) : (i *= 2) {
         if (i == len) {
             const Int = std.meta.Int(.unsigned, i * 8);
-            const a_int = @bitCast(Int, @as([i]u8, a[0..i].*));
-            const b_int = @bitCast(Int, @as([i]u8, b[0..i].*));
+            const a_int: Int = @bitCast(@as([i]u8, a[0..i].*));
+            const b_int: Int = @bitCast(@as([i]u8, b[0..i].*));
             return a_int == b_int;
         }
     }

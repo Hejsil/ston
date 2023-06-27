@@ -124,7 +124,7 @@ fn deserializeLineAssert(comptime T: type, parser: anytype) DerserializeLineErro
                     return err;
 
                 const int = parser.intValue(info.tag_type) catch return err;
-                return @enumFromInt(T, int);
+                return @enumFromInt(int);
             };
         },
         .Bool => {
@@ -391,7 +391,7 @@ test "deserializeLine" {
         T{ .enum1 = .b },
         T{ .enum2 = .a },
         T{ .enum2 = .b },
-        T{ .enum2 = @enumFromInt(E2, 2) },
+        T{ .enum2 = @enumFromInt(2) },
         T{ .string = "abc" },
         T{ .string = "abc.def=111" },
         T{ .index = .{ .index = 2, .value = 4 } },
@@ -407,7 +407,7 @@ test "deserializeLine" {
         T{ .nest = .{ .enum1 = .b } },
         T{ .nest = .{ .enum2 = .a } },
         T{ .nest = .{ .enum2 = .b } },
-        T{ .nest = .{ .enum2 = @enumFromInt(E2, 2) } },
+        T{ .nest = .{ .enum2 = @enumFromInt(2) } },
         T{ .nest = .{ .index = .{ .index = 2, .value = 4 } } },
         T{ .nest = .{ .index = .{ .index = 1, .value = 3 } } },
         error.InvalidField,
@@ -486,7 +486,7 @@ fn serializeHelper(writer: anytype, prefix: *io.FixedBufferStream([]u8), value: 
 
     switch (@typeInfo(T)) {
         .Void, .Null => {},
-        .Bool => try serializeHelper(writer, prefix, @enumFromInt(Bool, @intFromBool(value))),
+        .Bool => try serializeHelper(writer, prefix, @as(Bool, @enumFromInt(@intFromBool(value)))),
         .Int, .ComptimeInt => {
             try writer.writeAll(prefix.getWritten());
             try writer.writeAll("=");
@@ -597,7 +597,7 @@ test "serialize - struct" {
         h: void = {},
         i: Field(u8) = .{ .name = "a", .value = 2 },
         j: E2 = .a,
-        k: E2 = @enumFromInt(E2, 2),
+        k: E2 = @enumFromInt(2),
         sm: std.StringArrayHashMap(u8),
         em: std.EnumMap(E1, u8) = std.EnumMap(E1, u8).init(.{
             .a = 0,
