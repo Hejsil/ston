@@ -283,7 +283,7 @@ pub fn Deserializer(comptime T: type) type {
                     return [_]info.child{default(info.child)} ** info.len;
                 },
                 .Vector => |info| {
-                    return @splat(info.len, default(info.child));
+                    return @splat(default(info.child));
                 },
                 .Union => |info| {
                     const field_0 = info.fields[0];
