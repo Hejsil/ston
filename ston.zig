@@ -514,8 +514,7 @@ fn serializeHelper(writer: anytype, prefix: *io.FixedBufferStream([]u8), value: 
             else => @compileError("Type '" ++ @typeName(T) ++ "' not supported"),
         },
         .Array => |info| {
-            var l: usize = info.len;
-            try serializeHelper(writer, prefix, value[0..l]);
+            try serializeHelper(writer, prefix, @as([]const info.child, &value));
         },
         .Enum => |info| {
             try writer.writeAll(prefix.getWritten());
