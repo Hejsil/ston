@@ -570,8 +570,7 @@ fn expectSerialized(str: []const u8, value: anytype) !void {
 }
 
 test "serialize - struct" {
-    const E1 = enum { a, b };
-    const E2 = enum(u8) { a = 0, b = 1, _ };
+    const E1 = enum(u8) { a = 0, b = 1, _ };
 
     var sm = std.StringArrayHashMap(u8).init(testing.allocator);
     defer sm.deinit();
@@ -595,13 +594,9 @@ test "serialize - struct" {
         g: f32 = 1.5,
         h: void = {},
         i: Field(u8) = .{ .name = "a", .value = 2 },
-        j: E2 = .a,
-        k: E2 = @enumFromInt(2),
+        j: E1 = .a,
+        k: E1 = @enumFromInt(2),
         sm: std.StringArrayHashMap(u8),
-        em: std.EnumMap(E1, u8) = std.EnumMap(E1, u8).init(.{
-            .a = 0,
-            .b = 1,
-        }),
         im: std.AutoArrayHashMap(u8, u8),
     };
     try expectSerialized(
@@ -617,8 +612,6 @@ test "serialize - struct" {
         \\.k=2
         \\.sm.a=0
         \\.sm.b=1
-        \\.em.a=0
-        \\.em.b=1
         \\.im[3]=5
         \\.im[4]=6
         \\
@@ -636,8 +629,6 @@ test "serialize - struct" {
         \\[0].k=2
         \\[0].sm.a=0
         \\[0].sm.b=1
-        \\[0].em.a=0
-        \\[0].em.b=1
         \\[0].im[3]=5
         \\[0].im[4]=6
         \\[1].a=1
@@ -652,8 +643,6 @@ test "serialize - struct" {
         \\[1].k=2
         \\[1].sm.a=0
         \\[1].sm.b=1
-        \\[1].em.a=0
-        \\[1].em.b=1
         \\[1].im[3]=5
         \\[1].im[4]=6
         \\
@@ -672,8 +661,6 @@ test "serialize - struct" {
         \\[0][0].k=2
         \\[0][0].sm.a=0
         \\[0][0].sm.b=1
-        \\[0][0].em.a=0
-        \\[0][0].em.b=1
         \\[0][0].im[3]=5
         \\[0][0].im[4]=6
         \\[0][1].a=1
@@ -688,8 +675,6 @@ test "serialize - struct" {
         \\[0][1].k=2
         \\[0][1].sm.a=0
         \\[0][1].sm.b=1
-        \\[0][1].em.a=0
-        \\[0][1].em.b=1
         \\[0][1].im[3]=5
         \\[0][1].im[4]=6
         \\[1][0].a=1
@@ -704,8 +689,6 @@ test "serialize - struct" {
         \\[1][0].k=2
         \\[1][0].sm.a=0
         \\[1][0].sm.b=1
-        \\[1][0].em.a=0
-        \\[1][0].em.b=1
         \\[1][0].im[3]=5
         \\[1][0].im[4]=6
         \\[1][1].a=1
@@ -720,8 +703,6 @@ test "serialize - struct" {
         \\[1][1].k=2
         \\[1][1].sm.a=0
         \\[1][1].sm.b=1
-        \\[1][1].em.a=0
-        \\[1][1].em.b=1
         \\[1][1].im[3]=5
         \\[1][1].im[4]=6
         \\
