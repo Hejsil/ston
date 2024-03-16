@@ -495,9 +495,7 @@ fn serializeHelper(writer: anytype, prefix: *io.FixedBufferStream([]u8), value: 
         },
         .Float, .ComptimeFloat => {
             try writer.writeAll(prefix.getWritten());
-            try writer.writeAll("=");
-            try fmt.formatFloatDecimal(value, .{}, writer);
-            try writer.writeAll("\n");
+            try writer.print("={d}\n", .{value});
         },
         .Optional => if (value) |v| {
             try serializeHelper(writer, prefix, v);
